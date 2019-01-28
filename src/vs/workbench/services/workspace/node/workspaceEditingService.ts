@@ -3,51 +3,51 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { IWorkspaceEditingService } from 'vs/workbench/services/workspace/common/workspaceEditing';
-import URI from 'vs/base/common/uri';
+import { URI } from 'vs/base/common/uri';
 import * as nls from 'vs/nls';
-import { TPromise } from 'vs/base/common/winjs.base';
 import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
-import { IWindowService, IEnterWorkspaceResult } from 'vs/platform/windows/common/windows';
+import { IWindowService, MessageBoxOptions, IWindowsService } from 'vs/platform/windows/common/windows';
 import { IJSONEditingService, JSONEditingError, JSONEditingErrorCode } from 'vs/workbench/services/configuration/common/jsonEditing';
-import { IWorkspaceIdentifier, IWorkspaceFolderCreationData } from 'vs/platform/workspaces/common/workspaces';
+import { IWorkspaceIdentifier, IWorkspaceFolderCreationData, isWorkspaceIdentifier, toWorkspaceIdentifier, IWorkspacesService } from 'vs/platform/workspaces/common/workspaces';
 import { IWorkspaceConfigurationService } from 'vs/workbench/services/configuration/common/configuration';
 import { WorkspaceService } from 'vs/workbench/services/configuration/node/configurationService';
-import { migrateStorageToMultiRootWorkspace } from 'vs/platform/storage/common/migration';
 import { IStorageService } from 'vs/platform/storage/common/storage';
-import { StorageService } from 'vs/platform/storage/common/storageService';
-import { ConfigurationScope, IConfigurationRegistry, Extensions as ConfigurationExtensions } from 'vs/platform/configuration/common/configurationRegistry';
+import { StorageService } from 'vs/platform/storage/node/storageService';
+import { ConfigurationScope, IConfigurationRegistry, Extensions as ConfigurationExtensions, IConfigurationPropertySchema } from 'vs/platform/configuration/common/configurationRegistry';
 import { Registry } from 'vs/platform/registry/common/platform';
-import { IExtensionService } from 'vs/platform/extensions/common/extensions';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 import { IBackupFileService } from 'vs/workbench/services/backup/common/backup';
 import { BackupFileService } from 'vs/workbench/services/backup/node/backupFileService';
-import { IChoiceService, Severity, IMessageService } from 'vs/platform/message/common/message';
 import { ICommandService } from 'vs/platform/commands/common/commands';
 import { distinct } from 'vs/base/common/arrays';
 import { isLinux } from 'vs/base/common/platform';
-import { isEqual } from 'vs/base/common/resources';
+import { isEqual, basename } from 'vs/base/common/resources';
+import { INotificationService, Severity } from 'vs/platform/notification/common/notification';
+import { IFileService } from 'vs/platform/files/common/files';
+import { rewriteWorkspaceFileForNewLocation } from 'vs/platform/workspaces/node/workspaces';
 
 export class WorkspaceEditingService implements IWorkspaceEditingService {
 
-	public _serviceBrand: any;
+	_serviceBrand: any;
 
 	constructor(
-		@IJSONEditingService private jsonEditingService: IJSONEditingService,
-		@IWorkspaceContextService private contextService: WorkspaceService,
-		@IWindowService private windowService: IWindowService,
-		@IWorkspaceConfigurationService private workspaceConfigurationService: IWorkspaceConfigurationService,
-		@IStorageService private storageService: IStorageService,
-		@IExtensionService private extensionService: IExtensionService,
-		@IBackupFileService private backupFileService: IBackupFileService,
-		@IChoiceService private choiceService: IChoiceService,
-		@IMessageService private messageService: IMessageService,
-		@ICommandService private commandService: ICommandService
+		@IJSONEditingService private readonly jsonEditingService: IJSONEditingService,
+		@IWorkspaceContextService private readonly contextService: WorkspaceService,
+		@IWindowService private readonly windowService: IWindowService,
+		@IWorkspaceConfigurationService private readonly workspaceConfigurationService: IWorkspaceConfigurationService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IExtensionService private readonly extensionService: IExtensionService,
+		@IBackupFileService private readonly backupFileService: IBackupFileService,
+		@INotificationService private readonly notificationService: INotificationService,
+		@ICommandService private readonly commandService: ICommandService,
+		@IFileService private readonly fileSystemService: IFileService,
+		@IWindowsService private readonly windowsService: IWindowsService,
+		@IWorkspacesService private readonly workspaceService: IWorkspacesService
 	) {
 	}
 
-	public updateFolders(index: number, deleteCount?: number, foldersToAdd?: IWorkspaceFolderCreationData[], donotNotifyError?: boolean): TPromise<void> {
+	updateFolders(index: number, deleteCount?: number, foldersToAdd?: IWorkspaceFolderCreationData[], donotNotifyError?: boolean): Promise<void> {
 		const folders = this.contextService.getWorkspace().folders;
 
 		let foldersToDelete: URI[] = [];
@@ -59,7 +59,7 @@ export class WorkspaceEditingService implements IWorkspaceEditingService {
 		const wantsToAdd = Array.isArray(foldersToAdd) && foldersToAdd.length > 0;
 
 		if (!wantsToAdd && !wantsToDelete) {
-			return TPromise.as(void 0); // return early if there is nothing to do
+			return Promise.resolve(); // return early if there is nothing to do
 		}
 
 		// Add Folders
@@ -73,22 +73,35 @@ export class WorkspaceEditingService implements IWorkspaceEditingService {
 		}
 
 		// Add & Delete Folders
-		if (this.includesSingleFolderWorkspace(foldersToDelete)) {
+		else {
+
 			// if we are in single-folder state and the folder is replaced with
 			// other folders, we handle this specially and just enter workspace
 			// mode with the folders that are being added.
-			return this.createAndEnterWorkspace(foldersToAdd);
+			if (this.includesSingleFolderWorkspace(foldersToDelete)) {
+				return this.createAndEnterWorkspace(foldersToAdd);
+			}
+
+			// if we are not in workspace-state, we just add the folders
+			if (this.contextService.getWorkbenchState() !== WorkbenchState.WORKSPACE) {
+				return this.doAddFolders(foldersToAdd, index, donotNotifyError);
+			}
+
+			// finally, update folders within the workspace
+			return this.doUpdateFolders(foldersToAdd, foldersToDelete, index, donotNotifyError);
 		}
-
-		// Make sure to first remove folders and then add them to account for folders being updated
-		return this.removeFolders(foldersToDelete).then(() => this.doAddFolders(foldersToAdd, index, donotNotifyError));
 	}
 
-	public addFolders(foldersToAdd: IWorkspaceFolderCreationData[], donotNotifyError: boolean = false): TPromise<void> {
-		return this.doAddFolders(foldersToAdd, void 0, donotNotifyError);
+	private doUpdateFolders(foldersToAdd: IWorkspaceFolderCreationData[], foldersToDelete: URI[], index?: number, donotNotifyError: boolean = false): Promise<void> {
+		return this.contextService.updateFolders(foldersToAdd, foldersToDelete, index)
+			.then(() => null, error => donotNotifyError ? Promise.reject(error) : this.handleWorkspaceConfigurationEditingError(error));
 	}
 
-	private doAddFolders(foldersToAdd: IWorkspaceFolderCreationData[], index?: number, donotNotifyError: boolean = false): TPromise<void> {
+	addFolders(foldersToAdd: IWorkspaceFolderCreationData[], donotNotifyError: boolean = false): Promise<void> {
+		return this.doAddFolders(foldersToAdd, undefined, donotNotifyError);
+	}
+
+	private doAddFolders(foldersToAdd: IWorkspaceFolderCreationData[], index?: number, donotNotifyError: boolean = false): Promise<void> {
 		const state = this.contextService.getWorkbenchState();
 
 		// If we are in no-workspace or single-folder workspace, adding folders has to
@@ -99,7 +112,7 @@ export class WorkspaceEditingService implements IWorkspaceEditingService {
 			newWorkspaceFolders = distinct(newWorkspaceFolders, folder => isLinux ? folder.uri.toString() : folder.uri.toString().toLowerCase());
 
 			if (state === WorkbenchState.EMPTY && newWorkspaceFolders.length === 0 || state === WorkbenchState.FOLDER && newWorkspaceFolders.length === 1) {
-				return TPromise.as(void 0); // return if the operation is a no-op for the current state
+				return Promise.resolve(); // return if the operation is a no-op for the current state
 			}
 
 			return this.createAndEnterWorkspace(newWorkspaceFolders);
@@ -107,10 +120,10 @@ export class WorkspaceEditingService implements IWorkspaceEditingService {
 
 		// Delegate addition of folders to workspace service otherwise
 		return this.contextService.addFolders(foldersToAdd, index)
-			.then(() => null, error => donotNotifyError ? TPromise.wrapError(error) : this.handleWorkspaceConfigurationEditingError(error));
+			.then(() => null, error => donotNotifyError ? Promise.reject(error) : this.handleWorkspaceConfigurationEditingError(error));
 	}
 
-	public removeFolders(foldersToRemove: URI[], donotNotifyError: boolean = false): TPromise<void> {
+	removeFolders(foldersToRemove: URI[], donotNotifyError: boolean = false): Promise<void> {
 
 		// If we are in single-folder state and the opened folder is to be removed,
 		// we create an empty workspace and enter it.
@@ -120,119 +133,186 @@ export class WorkspaceEditingService implements IWorkspaceEditingService {
 
 		// Delegate removal of folders to workspace service otherwise
 		return this.contextService.removeFolders(foldersToRemove)
-			.then(() => null, error => donotNotifyError ? TPromise.wrapError(error) : this.handleWorkspaceConfigurationEditingError(error));
+			.then(() => null, error => donotNotifyError ? Promise.reject(error) : this.handleWorkspaceConfigurationEditingError(error));
 	}
 
 	private includesSingleFolderWorkspace(folders: URI[]): boolean {
 		if (this.contextService.getWorkbenchState() === WorkbenchState.FOLDER) {
 			const workspaceFolder = this.contextService.getWorkspace().folders[0];
-			return (folders.some(folder => isEqual(folder, workspaceFolder.uri, !isLinux)));
+			return (folders.some(folder => isEqual(folder, workspaceFolder.uri)));
 		}
 
 		return false;
 	}
 
-	public createAndEnterWorkspace(folders?: IWorkspaceFolderCreationData[], path?: string): TPromise<void> {
-		return this.doEnterWorkspace(() => this.windowService.createAndEnterWorkspace(folders, path));
+	async createAndEnterWorkspace(folders: IWorkspaceFolderCreationData[], path?: URI): Promise<void> {
+		if (path && !this.isValidTargetWorkspacePath(path)) {
+			return Promise.reject(null);
+		}
+
+		const untitledWorkspace = await this.workspaceService.createUntitledWorkspace(folders);
+		if (path) {
+			await this.saveWorkspaceAs(untitledWorkspace, path);
+		} else {
+			path = URI.file(untitledWorkspace.configPath);
+		}
+		return this.enterWorkspace(path);
 	}
 
-	public saveAndEnterWorkspace(path: string): TPromise<void> {
-		return this.doEnterWorkspace(() => this.windowService.saveAndEnterWorkspace(path));
+	async saveAndEnterWorkspace(path: URI): Promise<void> {
+		if (!this.isValidTargetWorkspacePath(path)) {
+			return Promise.reject(null);
+		}
+		const currentWorkspaceIdentifier = toWorkspaceIdentifier(this.contextService.getWorkspace());
+		if (!isWorkspaceIdentifier(currentWorkspaceIdentifier)) {
+			return Promise.reject(null);
+		}
+		await this.saveWorkspaceAs(currentWorkspaceIdentifier, path);
+
+		return this.enterWorkspace(path);
 	}
 
-	private handleWorkspaceConfigurationEditingError(error: JSONEditingError): TPromise<void> {
+	async isValidTargetWorkspacePath(path: URI): Promise<boolean> {
+
+		const windows = await this.windowsService.getWindows();
+
+		// Prevent overwriting a workspace that is currently opened in another window
+		if (windows.some(window => window.workspace && isEqual(URI.file(window.workspace.configPath), path))) {
+			const options: MessageBoxOptions = {
+				type: 'info',
+				buttons: [nls.localize('ok', "OK")],
+				message: nls.localize('workspaceOpenedMessage', "Unable to save workspace '{0}'", basename(path)),
+				detail: nls.localize('workspaceOpenedDetail', "The workspace is already opened in another window. Please close that window first and then try again."),
+				noLink: true
+			};
+			return this.windowService.showMessageBox(options).then(() => false);
+		}
+
+		return Promise.resolve(true); // OK
+	}
+
+	private async saveWorkspaceAs(workspace: IWorkspaceIdentifier, targetConfigPathURI: URI): Promise<any> {
+		const configPathURI = URI.file(workspace.configPath);
+
+		// Return early if target is same as source
+		if (isEqual(configPathURI, targetConfigPathURI)) {
+			return Promise.resolve(null);
+		}
+
+		// Read the contents of the workspace file, update it to new location and save it.
+		const raw = await this.fileSystemService.resolveContent(configPathURI);
+		const newRawWorkspaceContents = rewriteWorkspaceFileForNewLocation(raw.value, configPathURI, targetConfigPathURI);
+		await this.fileSystemService.createFile(targetConfigPathURI, newRawWorkspaceContents, { overwrite: true });
+	}
+
+	private handleWorkspaceConfigurationEditingError(error: JSONEditingError): Promise<void> {
 		switch (error.code) {
 			case JSONEditingErrorCode.ERROR_INVALID_FILE:
-				return this.onInvalidWorkspaceConfigurationFileError();
+				this.onInvalidWorkspaceConfigurationFileError();
+				return Promise.resolve();
 			case JSONEditingErrorCode.ERROR_FILE_DIRTY:
-				return this.onWorkspaceConfigurationFileDirtyError();
+				this.onWorkspaceConfigurationFileDirtyError();
+				return Promise.resolve();
 		}
-		this.messageService.show(Severity.Error, error.message);
-		return TPromise.as(void 0);
+		this.notificationService.error(error.message);
+
+		return Promise.resolve();
 	}
 
-	private onInvalidWorkspaceConfigurationFileError(): TPromise<void> {
+	private onInvalidWorkspaceConfigurationFileError(): void {
 		const message = nls.localize('errorInvalidTaskConfiguration', "Unable to write into workspace configuration file. Please open the file to correct errors/warnings in it and try again.");
-		return this.askToOpenWorkspaceConfigurationFile(message);
+		this.askToOpenWorkspaceConfigurationFile(message);
 	}
 
-	private onWorkspaceConfigurationFileDirtyError(): TPromise<void> {
+	private onWorkspaceConfigurationFileDirtyError(): void {
 		const message = nls.localize('errorWorkspaceConfigurationFileDirty', "Unable to write into workspace configuration file because the file is dirty. Please save it and try again.");
-		return this.askToOpenWorkspaceConfigurationFile(message);
+		this.askToOpenWorkspaceConfigurationFile(message);
 	}
 
-	private askToOpenWorkspaceConfigurationFile(message: string): TPromise<void> {
-		return this.choiceService.choose(Severity.Error, message, [nls.localize('openWorkspaceConfigurationFile', "Open Workspace Configuration File"), nls.localize('close', "Close")], 1)
-			.then(option => {
-				switch (option) {
-					case 0:
-						this.commandService.executeCommand('workbench.action.openWorkspaceConfigFile');
-						break;
-				}
-			});
+	private askToOpenWorkspaceConfigurationFile(message: string): void {
+		this.notificationService.prompt(Severity.Error, message,
+			[{
+				label: nls.localize('openWorkspaceConfigurationFile', "Open Workspace Configuration"),
+				run: () => this.commandService.executeCommand('workbench.action.openWorkspaceConfigFile')
+			}]
+		);
 	}
 
-	private doEnterWorkspace(mainSidePromise: () => TPromise<IEnterWorkspaceResult>): TPromise<void> {
+	enterWorkspace(path: URI): Promise<void> {
 
 		// Stop the extension host first to give extensions most time to shutdown
 		this.extensionService.stopExtensionHost();
+		let extensionHostStarted: boolean = false;
 
 		const startExtensionHost = () => {
 			this.extensionService.startExtensionHost();
+			extensionHostStarted = true;
 		};
 
-		return mainSidePromise().then(result => {
+		return this.windowService.enterWorkspace(path).then(result => {
 
 			// Migrate storage and settings if we are to enter a workspace
 			if (result) {
 				return this.migrate(result.workspace).then(() => {
 
-					// TODO@Ben TODO@Sandeep the following requires ugly casts and should probably have a service interface
-
 					// Reinitialize backup service
-					const backupFileService = this.backupFileService as BackupFileService;
-					backupFileService.initialize(result.backupPath);
+					if (this.backupFileService instanceof BackupFileService) {
+						this.backupFileService.initialize(result.backupPath);
+					}
 
 					// Reinitialize configuration service
 					const workspaceImpl = this.contextService as WorkspaceService;
-					return workspaceImpl.initialize(result.workspace);
+					return workspaceImpl.initialize(result.workspace, startExtensionHost);
 				});
 			}
 
-			return TPromise.as(void 0);
-		}).then(startExtensionHost, error => {
-			startExtensionHost(); // in any case start the extension host again!
+			return Promise.resolve();
+		}).then(undefined, error => {
+			if (!extensionHostStarted) {
+				startExtensionHost(); // start the extension host if not started
+			}
 
-			return TPromise.wrapError(error);
+			return Promise.reject(error);
 		});
 	}
 
-	private migrate(toWorkspace: IWorkspaceIdentifier): TPromise<void> {
+	private migrate(toWorkspace: IWorkspaceIdentifier): Promise<void> {
 
-		// Storage (UI State) migration
-		this.migrateStorage(toWorkspace);
+		// Storage migration
+		return this.migrateStorage(toWorkspace).then(() => {
 
-		// Settings migration (only if we come from a folder workspace)
-		if (this.contextService.getWorkbenchState() === WorkbenchState.FOLDER) {
-			return this.copyWorkspaceSettings(toWorkspace);
-		}
+			// Settings migration (only if we come from a folder workspace)
+			if (this.contextService.getWorkbenchState() === WorkbenchState.FOLDER) {
+				return this.migrateWorkspaceSettings(toWorkspace);
+			}
 
-		return TPromise.as(void 0);
+			return undefined;
+		});
 	}
 
-	private migrateStorage(toWorkspace: IWorkspaceIdentifier): void {
-
-		// TODO@Ben revisit this when we move away from local storage to a file based approach
+	private migrateStorage(toWorkspace: IWorkspaceIdentifier): Promise<void> {
 		const storageImpl = this.storageService as StorageService;
-		const newWorkspaceId = migrateStorageToMultiRootWorkspace(storageImpl.workspaceId, toWorkspace, storageImpl.workspaceStorage);
-		storageImpl.setWorkspaceId(newWorkspaceId);
+
+		return storageImpl.migrate(toWorkspace);
 	}
 
-	public copyWorkspaceSettings(toWorkspace: IWorkspaceIdentifier): TPromise<void> {
+	private migrateWorkspaceSettings(toWorkspace: IWorkspaceIdentifier): Promise<void> {
+		return this.doCopyWorkspaceSettings(toWorkspace, setting => setting.scope === ConfigurationScope.WINDOW);
+	}
+
+	copyWorkspaceSettings(toWorkspace: IWorkspaceIdentifier): Promise<void> {
+		return this.doCopyWorkspaceSettings(toWorkspace);
+	}
+
+	private doCopyWorkspaceSettings(toWorkspace: IWorkspaceIdentifier, filter?: (config: IConfigurationPropertySchema) => boolean): Promise<void> {
 		const configurationProperties = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties();
 		const targetWorkspaceConfiguration = {};
 		for (const key of this.workspaceConfigurationService.keys().workspace) {
-			if (configurationProperties[key] && !configurationProperties[key].notMultiRootAdopted && configurationProperties[key].scope === ConfigurationScope.WINDOW) {
+			if (configurationProperties[key]) {
+				if (filter && !filter(configurationProperties[key])) {
+					continue;
+				}
+
 				targetWorkspaceConfiguration[key] = this.workspaceConfigurationService.inspect(key).workspace;
 			}
 		}

@@ -3,17 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { EditorInput } from 'vs/workbench/common/editor';
 import { SyncDescriptor } from 'vs/platform/instantiation/common/descriptors';
 import { Registry } from 'vs/platform/registry/common/platform';
 import { BaseEditor } from 'vs/workbench/browser/parts/editor/baseEditor';
 import { IConstructorSignature0, IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { isArray } from 'vs/base/common/types';
-import URI from 'vs/base/common/uri';
-import { DataTransfers } from 'vs/base/browser/dnd';
-import { IEditorViewState } from 'vs/editor/common/editorCommon';
 
 export interface IEditorDescriptor {
 	instantiate(instantiationService: IInstantiationService): BaseEditor;
@@ -41,12 +36,12 @@ export interface IEditorRegistry {
 	/**
 	 * Returns the editor descriptor for the given input or null if none.
 	 */
-	getEditor(input: EditorInput): IEditorDescriptor;
+	getEditor(input: EditorInput): IEditorDescriptor | null;
 
 	/**
 	 * Returns the editor descriptor for the given identifier or null if none.
 	 */
-	getEditorById(editorId: string): IEditorDescriptor;
+	getEditorById(editorId: string): IEditorDescriptor | null;
 
 	/**
 	 * Returns an array of registered editors known to the platform.
@@ -69,19 +64,19 @@ export class EditorDescriptor implements IEditorDescriptor {
 		this.name = name;
 	}
 
-	public instantiate(instantiationService: IInstantiationService): BaseEditor {
+	instantiate(instantiationService: IInstantiationService): BaseEditor {
 		return instantiationService.createInstance(this.ctor);
 	}
 
-	public getId(): string {
+	getId(): string {
 		return this.id;
 	}
 
-	public getName(): string {
+	getName(): string {
 		return this.name;
 	}
 
-	public describes(obj: any): boolean {
+	describes(obj: any): boolean {
 		return obj instanceof BaseEditor && (<BaseEditor>obj).getId() === this.id;
 	}
 }
@@ -89,15 +84,11 @@ export class EditorDescriptor implements IEditorDescriptor {
 const INPUT_DESCRIPTORS_PROPERTY = '__$inputDescriptors';
 
 class EditorRegistry implements IEditorRegistry {
-	private editors: EditorDescriptor[];
+	private editors: EditorDescriptor[] = [];
 
-	constructor() {
-		this.editors = [];
-	}
-
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>): void;
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>[]): void;
-	public registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: any): void {
+	registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>): void;
+	registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: SyncDescriptor<EditorInput>[]): void;
+	registerEditor(descriptor: EditorDescriptor, editorInputDescriptor: any): void {
 
 		// Support both non-array and array parameter
 		let inputDescriptors: SyncDescriptor<EditorInput>[] = [];
@@ -112,15 +103,14 @@ class EditorRegistry implements IEditorRegistry {
 		this.editors.push(descriptor);
 	}
 
-	public getEditor(input: EditorInput): EditorDescriptor {
+	getEditor(input: EditorInput): EditorDescriptor | null {
 		const findEditorDescriptors = (input: EditorInput, byInstanceOf?: boolean): EditorDescriptor[] => {
 			const matchingDescriptors: EditorDescriptor[] = [];
 
-			for (let i = 0; i < this.editors.length; i++) {
-				const editor = this.editors[i];
+			for (const editor of this.editors) {
 				const inputDescriptors = <SyncDescriptor<EditorInput>[]>editor[INPUT_DESCRIPTORS_PROPERTY];
-				for (let j = 0; j < inputDescriptors.length; j++) {
-					const inputClass = inputDescriptors[j].ctor;
+				for (const inputDescriptor of inputDescriptors) {
+					const inputClass = inputDescriptor.ctor;
 
 					// Direct check on constructor type (ignores prototype chain)
 					if (!byInstanceOf && input.constructor === inputClass) {
@@ -164,9 +154,8 @@ class EditorRegistry implements IEditorRegistry {
 		return null;
 	}
 
-	public getEditorById(editorId: string): EditorDescriptor {
-		for (let i = 0; i < this.editors.length; i++) {
-			const editor = this.editors[i];
+	getEditorById(editorId: string): EditorDescriptor | null {
+		for (const editor of this.editors) {
 			if (editor.getId() === editorId) {
 				return editor;
 			}
@@ -175,18 +164,17 @@ class EditorRegistry implements IEditorRegistry {
 		return null;
 	}
 
-	public getEditors(): EditorDescriptor[] {
+	getEditors(): EditorDescriptor[] {
 		return this.editors.slice(0);
 	}
 
-	public setEditors(editorsToSet: EditorDescriptor[]): void {
+	setEditors(editorsToSet: EditorDescriptor[]): void {
 		this.editors = editorsToSet;
 	}
 
-	public getEditorInputs(): any[] {
+	getEditorInputs(): any[] {
 		const inputClasses: any[] = [];
-		for (let i = 0; i < this.editors.length; i++) {
-			const editor = this.editors[i];
+		for (const editor of this.editors) {
 			const editorInputDescriptors = <SyncDescriptor<EditorInput>[]>editor[INPUT_DESCRIPTORS_PROPERTY];
 			inputClasses.push(...editorInputDescriptors.map(descriptor => descriptor.ctor));
 		}
@@ -200,78 +188,3 @@ export const Extensions = {
 };
 
 Registry.add(Extensions.Editors, new EditorRegistry());
-
-export interface IDraggedResource {
-	resource: URI;
-	isExternal: boolean;
-}
-
-export interface IDraggedEditor extends IDraggedResource {
-	backupResource?: URI;
-	viewState?: IEditorViewState;
-}
-
-export interface ISerializedDraggedEditor {
-	resource: string;
-	backupResource: string;
-	viewState: IEditorViewState;
-}
-
-export const CodeDataTransfers = {
-	EDITOR: 'CodeEditor'
-};
-
-export function extractResources(e: DragEvent, externalOnly?: boolean): (IDraggedResource | IDraggedEditor)[] {
-	const resources: (IDraggedResource | IDraggedEditor)[] = [];
-	if (e.dataTransfer.types.length > 0) {
-
-		// Check for window-to-window DND
-		if (!externalOnly) {
-
-			// Data Transfer: Code Editor
-			const rawEditorData = e.dataTransfer.getData(CodeDataTransfers.EDITOR);
-			if (rawEditorData) {
-				try {
-					const draggedEditor = JSON.parse(rawEditorData) as ISerializedDraggedEditor;
-					resources.push({ resource: URI.parse(draggedEditor.resource), backupResource: URI.parse(draggedEditor.backupResource), viewState: draggedEditor.viewState, isExternal: false });
-				} catch (error) {
-					// Invalid URI
-				}
-			}
-
-			// Data Transfer: URL
-			else {
-				try {
-					const rawURLsData = e.dataTransfer.getData(DataTransfers.URLS);
-					if (rawURLsData) {
-						const uriStrArray: string[] = JSON.parse(rawURLsData);
-						resources.push(...uriStrArray.map(uriStr => ({ resource: URI.parse(uriStr), isExternal: false })));
-					} else {
-						const rawURLData = e.dataTransfer.getData(DataTransfers.URL);
-						if (rawURLData) {
-							resources.push({ resource: URI.parse(rawURLData), isExternal: false });
-						}
-					}
-				} catch (error) {
-					// Invalid URI
-				}
-			}
-		}
-
-		// Check for native file transfer
-		if (e.dataTransfer && e.dataTransfer.files) {
-			for (let i = 0; i < e.dataTransfer.files.length; i++) {
-				const file = e.dataTransfer.files[i] as { path: string };
-				if (file && file.path) {
-					try {
-						resources.push({ resource: URI.file(file.path), isExternal: true });
-					} catch (error) {
-						// Invalid URI
-					}
-				}
-			}
-		}
-	}
-
-	return resources;
-}

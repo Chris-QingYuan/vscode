@@ -7,6 +7,8 @@
  * to be stable and consumed by external programs.
  */
 
+/// <reference lib="dom"/>
+
 declare module 'vscode-xterm' {
 	/**
 	 * A string representing text font weight.
@@ -14,9 +16,21 @@ declare module 'vscode-xterm' {
 	export type FontWeight = 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
 
 	/**
+	 * A string representing a renderer type.
+	 */
+	export type RendererType = 'dom' | 'canvas';
+
+	/**
 	 * An object containing start up options for the terminal.
 	 */
 	export interface ITerminalOptions {
+		/**
+		 * Whether background should support non-opaque color. It must be set before
+		 * executing open() method and can't be changed later without excuting it again.
+		 * Warning: Enabling this option can reduce performances somewhat.
+		 */
+		allowTransparency?: boolean;
+
 		/**
 		 * A data uri of the sound to use for the bell (needs bellStyle = 'sound').
 		 */
@@ -26,6 +40,16 @@ declare module 'vscode-xterm' {
 		 * The type of the bell notification the terminal will use.
 		 */
 		bellStyle?: 'none' /*| 'visual'*/ | 'sound' /*| 'both'*/;
+
+		/**
+		 * When enabled the cursor will be set to the beginning of the next line
+		 * with every new line. This equivalent to sending '\r\n' for each '\n'.
+		 * Normally the termios settings of the underlying PTY deals with the
+		 * translation of '\n' to '\r\n' and this setting should not be used. If you
+		 * deal with data from a non-PTY related source, this settings might be
+		 * useful.
+		 */
+		convertEol?: boolean;
 
 		/**
 		 * The number of columns in the terminal.
@@ -48,9 +72,45 @@ declare module 'vscode-xterm' {
 		disableStdin?: boolean;
 
 		/**
+		 * Whether to draw bold text in bright colors. The default is true.
+		 */
+		drawBoldTextInBrightColors?: boolean;
+
+		/**
 		 * Whether to enable the rendering of bold text.
+		 *
+		 * @deprecated Use fontWeight and fontWeightBold instead.
 		 */
 		enableBold?: boolean;
+
+		/**
+		 * What character atlas implementation to use. The character atlas caches drawn characters,
+		 * speeding up rendering significantly. However, it can introduce some minor rendering
+		 * artifacts.
+		 *
+		 * - 'none': Don't use an atlas.
+		 * - 'static': Generate an atlas when the terminal starts or is reconfigured. This atlas will
+		 *   only contain ASCII characters in 16 colors.
+		 * - 'dynamic': Generate an atlas using a LRU cache as characters are requested. Limited to
+		 *   ASCII characters (for now), but supports 256 colors. For characters covered by the static
+		 *   cache, it's slightly slower in comparison, since there's more overhead involved in
+		 *   managing the cache.
+		 *
+		 * Currently defaults to 'static'. This option may be removed in the future. If it is, passed
+		 * parameters will be ignored.
+		 */
+		experimentalCharAtlas?: 'none' | 'static' | 'dynamic';
+
+		/**
+		 * (EXPERIMENTAL) Defines which implementation to use for buffer lines.
+		 *
+		 * - 'JsArray': The default/stable implementation.
+		 * - 'TypedArray': The new experimental implementation based on TypedArrays that is expected to
+		 *   significantly boost performance and memory consumption. Use at your own risk.
+		 *
+		 * @deprecated This option will be removed in the future.
+		 */
+		experimentalBufferLineImpl?: 'JsArray' | 'TypedArray';
 
 		/**
 		 * The font size used to render text.
@@ -86,6 +146,31 @@ declare module 'vscode-xterm' {
 		 * Whether to treat option as the meta key.
 		 */
 		macOptionIsMeta?: boolean;
+
+		/**
+		 * Whether holding a modifier key will force normal selection behavior,
+		 * regardless of whether the terminal is in mouse events mode. This will
+		 * also prevent mouse events from being emitted by the terminal. For example,
+		 * this allows you to use xterm.js' regular selection inside tmux with
+		 * mouse mode enabled.
+		 */
+		macOptionClickForcesSelection?: boolean;
+
+		/**
+		 * The type of renderer to use, this allows using the fallback DOM renderer
+		 * when canvas is too slow for the environment. The following features do
+		 * not work when the DOM renderer is used:
+		 *
+		 * - Letter spacing
+		 * - Cursor blink
+		 */
+		rendererType?: RendererType;
+
+		/**
+		 * Whether to select the word under the cursor on right click, this is
+		 * standard behavior in a lot of macOS applications.
+		 */
+		rightClickSelectsWord?: boolean;
 
 		/**
 		 * The number of rows in the terminal.
@@ -175,8 +260,8 @@ declare module 'vscode-xterm' {
 		matchIndex?: number;
 
 		/**
-		 * A callback that validates an individual link, returning true if valid and
-		 * false if invalid.
+		 * A callback that validates whether to create an individual link, pass
+		 * whether the link is valid to the callback.
 		 */
 		validationCallback?: (uri: string, callback: (isValid: boolean) => void) => void;
 
@@ -208,29 +293,35 @@ declare module 'vscode-xterm' {
 	}
 
 	export interface IEventEmitter {
-	  on(type: string, listener: (...args: any[]) => void): void;
-	  off(type: string, listener: (...args: any[]) => void): void;
-	  emit(type: string, data?: any): void;
-	  addDisposableListener(type: string, handler: (...args: any[]) => void): IDisposable;
+		on(type: string, listener: (...args: any[]) => void): void;
+		off(type: string, listener: (...args: any[]) => void): void;
+		emit(type: string, data?: any): void;
+		addDisposableListener(type: string, handler: (...args: any[]) => void): IDisposable;
 	}
 
 	/**
 	 * An object that can be disposed via a dispose function.
 	 */
 	export interface IDisposable {
-	  dispose(): void;
+		dispose(): void;
+	}
+
+	export interface IMarker extends IDisposable {
+		readonly id: number;
+		readonly isDisposed: boolean;
+		readonly line: number;
 	}
 
 	export interface ILocalizableStrings {
-	  blankLine: string;
-	  promptLabel: string;
-	  tooMuchOutput: string;
+		blankLine: string;
+		promptLabel: string;
+		tooMuchOutput: string;
 	}
 
 	/**
 	 * The class that represents an xterm.js terminal.
 	 */
-	export class Terminal {
+	export class Terminal implements IEventEmitter, IDisposable {
 		/**
 		 * The element containing the terminal.
 		 */
@@ -250,6 +341,12 @@ declare module 'vscode-xterm' {
 		 * The number of columns in the terminal's viewport.
 		 */
 		cols: number;
+
+		/**
+		 * (EXPERIMENTAL) Get all markers registered against the buffer. If the alt
+		 * buffer is active this will always return [].
+		 */
+		markers: IMarker[];
 
 		/**
 		 * Natural language strings that can be localized.
@@ -284,43 +381,43 @@ declare module 'vscode-xterm' {
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'data', listener: (data?: string) => void): void;
+		on(type: 'data', listener: (...args: any[]) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'key', listener: (key?: string, event?: KeyboardEvent) => void): void;
+		on(type: 'key', listener: (key: string, event: KeyboardEvent) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'keypress' | 'keydown', listener: (event?: KeyboardEvent) => void): void;
+		on(type: 'keypress' | 'keydown', listener: (event: KeyboardEvent) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'refresh', listener: (data?: {start: number, end: number}) => void): void;
+		on(type: 'refresh', listener: (data: { start: number, end: number }) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'resize', listener: (data?: {cols: number, rows: number}) => void): void;
+		on(type: 'resize', listener: (data: { cols: number, rows: number }) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'scroll', listener: (ydisp?: number) => void): void;
+		on(type: 'scroll', listener: (ydisp: number) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
 		 * @param listener The listener.
 		 */
-		on(type: 'title', listener: (title?: string) => void): void;
+		on(type: 'title', listener: (title: string) => void): void;
 		/**
 		 * Registers an event listener.
 		 * @param type The type of the event.
@@ -334,6 +431,23 @@ declare module 'vscode-xterm' {
 		 * @param listener The listener.
 		 */
 		off(type: 'blur' | 'focus' | 'linefeed' | 'selection' | 'data' | 'key' | 'keypress' | 'keydown' | 'refresh' | 'resize' | 'scroll' | 'title' | string, listener: (...args: any[]) => void): void;
+
+		/**
+		 * Emits an event on the terminal.
+		 * @param type The type of event
+		 * @param data data associated with the event.
+		 * @deprecated This is being removed from the API with no replacement, see
+		 * issue #1505.
+		 */
+		emit(type: string, data?: any): void;
+
+		/**
+		 * Adds an event listener to the Terminal, returning an IDisposable that can
+		 * be used to conveniently remove the event listener.
+		 * @param type The type of event.
+		 * @param handler The event handler.
+		 */
+		addDisposableListener(type: string, handler: (...args: any[]) => void): IDisposable;
 
 		/**
 		 * Resizes the terminal.
@@ -377,13 +491,58 @@ declare module 'vscode-xterm' {
 		 * @param options Options for the link matcher.
 		 * @return The ID of the new matcher, this can be used to deregister.
 		 */
-		registerLinkMatcher(regex: RegExp, handler: (event: MouseEvent, uri: string) => boolean | void, options?: ILinkMatcherOptions): number;
+		registerLinkMatcher(regex: RegExp, handler: (event: MouseEvent, uri: string) => void, options?: ILinkMatcherOptions): number;
 
 		/**
 		 * (EXPERIMENTAL) Deregisters a link matcher if it has been registered.
 		 * @param matcherId The link matcher's ID (returned after register)
 		 */
 		deregisterLinkMatcher(matcherId: number): void;
+
+		/**
+		 * (EXPERIMENTAL) Registers a character joiner, allowing custom sequences of
+		 * characters to be rendered as a single unit. This is useful in particular
+		 * for rendering ligatures and graphemes, among other things.
+		 *
+		 * Each registered character joiner is called with a string of text
+		 * representing a portion of a line in the terminal that can be rendered as
+		 * a single unit. The joiner must return a sorted array, where each entry is
+		 * itself an array of length two, containing the start (inclusive) and end
+		 * (exclusive) index of a substring of the input that should be rendered as
+		 * a single unit. When multiple joiners are provided, the results of each
+		 * are collected. If there are any overlapping substrings between them, they
+		 * are combined into one larger unit that is drawn together.
+		 *
+		 * All character joiners that are registered get called every time a line is
+		 * rendered in the terminal, so it is essential for the handler function to
+		 * run as quickly as possible to avoid slowdowns when rendering. Similarly,
+		 * joiners should strive to return the smallest possible substrings to
+		 * render together, since they aren't drawn as optimally as individual
+		 * characters.
+		 *
+		 * NOTE: character joiners are only used by the canvas renderer.
+		 *
+		 * @param handler The function that determines character joins. It is called
+		 * with a string of text that is eligible for joining and returns an array
+		 * where each entry is an array containing the start (inclusive) and end
+		 * (exclusive) indexes of ranges that should be rendered as a single unit.
+		 * @return The ID of the new joiner, this can be used to deregister
+		 */
+		registerCharacterJoiner(handler: (text: string) => [number, number][]): number;
+
+		/**
+		 * (EXPERIMENTAL) Deregisters the character joiner if one was registered.
+		 * NOTE: character joiners are only used by the canvas renderer.
+		 * @param joinerId The character joiner's ID (returned after register)
+		 */
+		deregisterCharacterJoiner(joinerId: number): void;
+
+		/**
+		 * (EXPERIMENTAL) Adds a marker to the normal buffer and returns it. If the
+		 * alt buffer is active, undefined is returned.
+		 * @param cursorYOffset The y position offset of the marker from the cursor.
+		 */
+		addMarker(cursorYOffset: number): IMarker;
 
 		/**
 		 * Gets whether the terminal has an active selection.
@@ -406,24 +565,23 @@ declare module 'vscode-xterm' {
 		 */
 		selectAll(): void;
 
-		// /**
-		//  * Find the next instance of the term, then scroll to and select it. If it
-		//  * doesn't exist, do nothing.
-		//  * @param term Tne search term.
-		//  * @return Whether a result was found.
-		//  */
-		// findNext(term: string): boolean;
+		/**
+		 * Selects text in the buffer between 2 lines.
+		 * @param start The 0-based line index to select from (inclusive).
+		 * @param end The 0-based line index to select to (inclusive).
+		 */
+		selectLines(start: number, end: number): void;
 
-		// /**
-		//  * Find the previous instance of the term, then scroll to and select it. If it
-		//  * doesn't exist, do nothing.
-		//  * @param term Tne search term.
-		//  * @return Whether a result was found.
-		//  */
-		// findPrevious(term: string): boolean;
+		/*
+		 * Disposes of the terminal, detaching it from the DOM and removing any
+		 * active listeners.
+		 */
+		dispose(): void;
 
 		/**
 		 * Destroys the terminal and detaches it from the DOM.
+		 *
+		 * @deprecated Use dispose() instead.
 		 */
 		destroy(): void;
 
@@ -450,6 +608,12 @@ declare module 'vscode-xterm' {
 		scrollToBottom(): void;
 
 		/**
+		 * Scrolls to a line within the buffer.
+		 * @param line The 0-based line index to scroll to.
+		 */
+		scrollToLine(line: number): void;
+
+		/**
 		 * Clear the entire buffer, making the prompt line the new first line.
 		 */
 		clear(): void;
@@ -464,12 +628,12 @@ declare module 'vscode-xterm' {
 		 * Retrieves an option's value from the terminal.
 		 * @param key The option key.
 		 */
-		getOption(key: 'bellSound' | 'bellStyle' | 'cursorStyle' | 'fontFamily' | 'termName'): string;
+		getOption(key: 'bellSound' | 'bellStyle' | 'cursorStyle' | 'fontFamily' | 'fontWeight' | 'fontWeightBold' | 'rendererType' | 'termName'): string;
 		/**
 		 * Retrieves an option's value from the terminal.
 		 * @param key The option key.
 		 */
-		getOption(key: 'cancelEvents' | 'convertEol' | 'cursorBlink' | 'debug' | 'disableStdin' | 'enableBold' | 'macOptionIsMeta' | 'popOnBell' | 'screenKeys' | 'useFlowControl' | 'visualBell'): boolean;
+		getOption(key: 'allowTransparency' | 'cancelEvents' | 'convertEol' | 'cursorBlink' | 'debug' | 'disableStdin' | 'enableBold' | 'macOptionIsMeta' | 'rightClickSelectsWord' | 'popOnBell' | 'screenKeys' | 'useFlowControl' | 'visualBell'): boolean;
 		/**
 		 * Retrieves an option's value from the terminal.
 		 * @param key The option key.
@@ -498,6 +662,12 @@ declare module 'vscode-xterm' {
 		 */
 		setOption(key: 'fontFamily' | 'termName' | 'bellSound', value: string): void;
 		/**
+		* Sets an option on the terminal.
+		* @param key The option key.
+		* @param value The option value.
+		*/
+		setOption(key: 'fontWeight' | 'fontWeightBold', value: null | 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900'): void;
+		/**
 		 * Sets an option on the terminal.
 		 * @param key The option key.
 		 * @param value The option value.
@@ -514,7 +684,7 @@ declare module 'vscode-xterm' {
 		 * @param key The option key.
 		 * @param value The option value.
 		 */
-		setOption(key: 'cancelEvents' | 'convertEol' | 'cursorBlink' | 'debug' | 'disableStdin' | 'enableBold' | 'macOptionIsMeta' | 'popOnBell' | 'screenKeys' | 'useFlowControl' | 'visualBell', value: boolean): void;
+		setOption(key: 'allowTransparency' | 'cancelEvents' | 'convertEol' | 'cursorBlink' | 'debug' | 'disableStdin' | 'enableBold' | 'macOptionIsMeta' | 'popOnBell' | 'rightClickSelectsWord' | 'screenKeys' | 'useFlowControl' | 'visualBell', value: boolean): void;
 		/**
 		 * Sets an option on the terminal.
 		 * @param key The option key.
@@ -544,6 +714,12 @@ declare module 'vscode-xterm' {
 		 * @param key The option key.
 		 * @param value The option value.
 		 */
+		setOption(key: 'cols' | 'rows', value: number): void;
+		/**
+		 * Sets an option on the terminal.
+		 * @param key The option key.
+		 * @param value The option value.
+		 */
 		setOption(key: string, value: any): void;
 
 		/**
@@ -565,39 +741,77 @@ declare module 'vscode-xterm' {
 		 * @param addon The addon to apply.
 		 */
 		static applyAddon(addon: any): void;
+	}
+}
 
 
-
-		// Modifications to official .d.ts below
+// Modifications to official .d.ts below
+declare module 'vscode-xterm' {
+	interface TerminalCore {
+		debug: boolean;
 
 		buffer: {
-			/**
-			 * The viewport position.
-			 */
+			y: number;
+			ybase: number;
 			ydisp: number;
+			x: number;
+			lines: any[];
+
+			translateBufferLineToString(lineIndex: number, trimRight: boolean): string;
 		};
+
+		handler(text: string): void;
 
 		/**
 		 * Emit an event on the terminal.
 		 */
 		emit(type: string, data: any): void;
 
+		charMeasure?: { height: number, width: number };
+
+		renderer: {
+			_renderLayers: any[];
+			onIntersectionChange: any;
+		};
+	}
+
+	interface ISearchOptions {
+		/**
+		 * Whether the find should be done as a regex.
+		 */
+		regex?: boolean;
+		/**
+		 * Whether only whole words should match.
+		 */
+		wholeWord?: boolean;
+		/**
+		 * Whether find should pay attention to case.
+		 */
+		caseSensitive?: boolean;
+	}
+
+	interface Terminal {
+		_core: TerminalCore;
+
+		webLinksInit(handler?: (event: MouseEvent, uri: string) => void, options?: ILinkMatcherOptions): void;
+		winptyCompatInit(): void;
+
 		/**
 		 * Find the next instance of the term, then scroll to and select it. If it
 		 * doesn't exist, do nothing.
-		 * @param term Tne search term.
+		 * @param term The search term.
+		 * @param findOptions Regex, whole word, and case sensitive options.
 		 * @return Whether a result was found.
 		 */
-		findNext(term: string): boolean;
+		findNext(term: string, findOptions: ISearchOptions): boolean;
 
 		/**
 		 * Find the previous instance of the term, then scroll to and select it. If it
 		 * doesn't exist, do nothing.
-		 * @param term Tne search term.
+		 * @param term The search term.
+		 * @param findOptions Regex, whole word, and case sensitive options.
 		 * @return Whether a result was found.
 		 */
-		findPrevious(term: string): boolean;
-
-		winptyCompatInit(): void;
+		findPrevious(term: string, findOptions: ISearchOptions): boolean;
 	}
 }

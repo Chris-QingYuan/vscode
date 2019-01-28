@@ -2,17 +2,15 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import nls = require('vs/nls');
-import { TPromise } from 'vs/base/common/winjs.base';
-import QuickOpen = require('vs/base/parts/quickopen/common/quickOpen');
-import Model = require('vs/base/parts/quickopen/browser/quickOpenModel');
+import * as nls from 'vs/nls';
+import * as QuickOpen from 'vs/base/parts/quickopen/common/quickOpen';
+import * as Model from 'vs/base/parts/quickopen/browser/quickOpenModel';
 import { IQuickOpenService } from 'vs/platform/quickOpen/common/quickOpen';
 
 import { CustomTask, ContributedTask } from 'vs/workbench/parts/tasks/common/tasks';
 import { ITaskService } from 'vs/workbench/parts/tasks/common/taskService';
-import { IExtensionService } from 'vs/platform/extensions/common/extensions';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
 
 import * as base from './quickOpen';
 
@@ -34,7 +32,7 @@ export class QuickOpenHandler extends base.QuickOpenHandler {
 
 	public static readonly ID = 'workbench.picker.tasks';
 
-	private activationPromise: TPromise<void>;
+	private activationPromise: Promise<void>;
 
 	constructor(
 		@IQuickOpenService quickOpenService: IQuickOpenService,
@@ -49,7 +47,7 @@ export class QuickOpenHandler extends base.QuickOpenHandler {
 		return nls.localize('tasksAriaLabel', "Type the name of a task to run");
 	}
 
-	protected getTasks(): TPromise<(CustomTask | ContributedTask)[]> {
+	protected getTasks(): Promise<Array<CustomTask | ContributedTask>> {
 		return this.activationPromise.then(() => {
 			return this.taskService.tasks().then(tasks => tasks.filter<CustomTask | ContributedTask>((task): task is CustomTask | ContributedTask => ContributedTask.is(task) || CustomTask.is(task)));
 		});

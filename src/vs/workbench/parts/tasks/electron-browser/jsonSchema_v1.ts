@@ -2,13 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as nls from 'vs/nls';
 import * as Objects from 'vs/base/common/objects';
 import { IJSONSchema } from 'vs/base/common/jsonSchema';
 
-import { ProblemMatcherRegistry } from 'vs/platform/markers/common/problemMatcher';
+import { ProblemMatcherRegistry } from 'vs/workbench/parts/tasks/common/problemMatcher';
 
 import commonSchema from './jsonSchemaCommon';
 
@@ -23,6 +22,7 @@ const schema: IJSONSchema = {
 						version: {
 							type: 'string',
 							enum: ['0.1.0'],
+							deprecationMessage: nls.localize('JsonSchema.version.deprecated', 'Task version 0.1.0 is deprecated. Please use 2.0.0'),
 							description: nls.localize('JsonSchema.version', 'The config\'s version number')
 						},
 						_runner: {
@@ -63,10 +63,10 @@ const shellCommand: IJSONSchema = {
 };
 
 schema.definitions = Objects.deepClone(commonSchema.definitions);
-let definitions = schema.definitions;
-definitions['commandConfiguration']['properties']['isShellCommand'] = Objects.deepClone(shellCommand);
-definitions['taskDescription']['properties']['isShellCommand'] = Objects.deepClone(shellCommand);
-definitions['taskRunnerConfiguration']['properties']['isShellCommand'] = Objects.deepClone(shellCommand);
+let definitions = schema.definitions!;
+definitions['commandConfiguration']['properties']!['isShellCommand'] = Objects.deepClone(shellCommand);
+definitions['taskDescription']['properties']!['isShellCommand'] = Objects.deepClone(shellCommand);
+definitions['taskRunnerConfiguration']['properties']!['isShellCommand'] = Objects.deepClone(shellCommand);
 
 Object.getOwnPropertyNames(definitions).forEach(key => {
 	let newKey = key + '1';
@@ -94,8 +94,8 @@ fixReferences(schema);
 ProblemMatcherRegistry.onReady().then(() => {
 	try {
 		let matcherIds = ProblemMatcherRegistry.keys().map(key => '$' + key);
-		definitions.problemMatcherType1.oneOf[0].enum = matcherIds;
-		(definitions.problemMatcherType1.oneOf[2].items as IJSONSchema).anyOf[1].enum = matcherIds;
+		definitions.problemMatcherType1.oneOf![0].enum = matcherIds;
+		(definitions.problemMatcherType1.oneOf![2].items as IJSONSchema).anyOf![1].enum = matcherIds;
 	} catch (err) {
 		console.log('Installing problem matcher ids failed');
 	}

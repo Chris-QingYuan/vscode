@@ -3,12 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import { ExtHostContext, ObjectIdentifier, IExtHostContext } from '../node/extHost.protocol';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
 import { registerSingleton } from 'vs/platform/instantiation/common/extensions';
-import Event, { Emitter } from 'vs/base/common/event';
+import { Event, Emitter } from 'vs/base/common/event';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { extHostCustomer } from 'vs/workbench/api/electron-browser/extHostCustomers';
 import { isThenable } from 'vs/base/common/async';
@@ -25,19 +23,19 @@ export interface IHeapService {
 	 * Track gc-collection for all new objects that
 	 * have the $ident-value set.
 	 */
-	trackRecursive<T>(obj: T | Thenable<T>): Thenable<T>;
+	trackRecursive<T>(obj: T | Promise<T>): Promise<T>;
 }
 
 export class HeapService implements IHeapService {
 
 	_serviceBrand: any;
 
-	private _onGarbageCollection: Emitter<number[]> = new Emitter<number[]>();
+	private readonly _onGarbageCollection: Emitter<number[]> = new Emitter<number[]>();
 	public readonly onGarbageCollection: Event<number[]> = this._onGarbageCollection.event;
 
 	private _activeSignals = new WeakMap<any, object>();
 	private _activeIds = new Set<number>();
-	private _consumeHandle: number;
+	private _consumeHandle: any;
 
 	constructor() {
 		//
@@ -47,7 +45,7 @@ export class HeapService implements IHeapService {
 		clearInterval(this._consumeHandle);
 	}
 
-	trackRecursive<T>(obj: T | Thenable<T>): Thenable<T> {
+	trackRecursive<T>(obj: T | Promise<T>): Promise<T> {
 		if (isThenable(obj)) {
 			return obj.then(result => this.trackRecursive(result));
 		} else {
@@ -63,7 +61,7 @@ export class HeapService implements IHeapService {
 
 		return import('gc-signals').then(({ GCSignal, consumeSignals }) => {
 
-			if (this._consumeHandle === void 0) {
+			if (this._consumeHandle === undefined) {
 				// ensure that there is one consumer of signals
 				this._consumeHandle = setInterval(() => {
 					const ids = consumeSignals();
@@ -139,4 +137,4 @@ export class MainThreadHeapService {
 
 }
 
-registerSingleton(IHeapService, HeapService);
+registerSingleton(IHeapService, HeapService, true);

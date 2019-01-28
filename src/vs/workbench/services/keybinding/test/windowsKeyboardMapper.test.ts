@@ -3,40 +3,34 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
+import { KeyChord, KeyCode, KeyMod, SimpleKeybinding, createKeybinding } from 'vs/base/common/keyCodes';
 import { OperatingSystem } from 'vs/base/common/platform';
-import { TPromise } from 'vs/base/common/winjs.base';
-import { WindowsKeyboardMapper, IWindowsKeyboardMapping } from 'vs/workbench/services/keybinding/common/windowsKeyboardMapper';
-import { createKeybinding, KeyMod, KeyCode, KeyChord, SimpleKeybinding } from 'vs/base/common/keyCodes';
-import { IResolvedKeybinding, assertResolveKeybinding, readRawMapping, assertMapping, assertResolveKeyboardEvent, assertResolveUserBinding } from 'vs/workbench/services/keybinding/test/keyboardMapperTestUtils';
-import { ScanCodeBinding, ScanCode } from 'vs/workbench/services/keybinding/common/scanCode';
+import { ScanCode, ScanCodeBinding } from 'vs/base/common/scanCode';
+import { IWindowsKeyboardMapping, WindowsKeyboardMapper } from 'vs/workbench/services/keybinding/common/windowsKeyboardMapper';
+import { IResolvedKeybinding, assertMapping, assertResolveKeybinding, assertResolveKeyboardEvent, assertResolveUserBinding, readRawMapping } from 'vs/workbench/services/keybinding/test/keyboardMapperTestUtils';
 
 const WRITE_FILE_IF_DIFFERENT = false;
 
-function createKeyboardMapper(isUSStandard: boolean, file: string): TPromise<WindowsKeyboardMapper> {
-	return readRawMapping<IWindowsKeyboardMapping>(file).then((rawMappings) => {
-		return new WindowsKeyboardMapper(isUSStandard, rawMappings);
-	});
+async function createKeyboardMapper(isUSStandard: boolean, file: string): Promise<WindowsKeyboardMapper> {
+	const rawMappings = await readRawMapping<IWindowsKeyboardMapping>(file);
+	return new WindowsKeyboardMapper(isUSStandard, rawMappings);
 }
 
 function _assertResolveKeybinding(mapper: WindowsKeyboardMapper, k: number, expected: IResolvedKeybinding[]): void {
-	assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Windows), expected);
+	const keyBinding = createKeybinding(k, OperatingSystem.Windows);
+	assertResolveKeybinding(mapper, keyBinding!, expected);
 }
 
 suite('keyboardMapper - WINDOWS de_ch', () => {
 
 	let mapper: WindowsKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'win_de_ch').then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		mapper = await createKeyboardMapper(false, 'win_de_ch');
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_de_ch.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_de_ch.txt');
 	});
 
 	test('resolveKeybinding Ctrl+A', () => {
@@ -80,7 +74,7 @@ suite('keyboardMapper - WINDOWS de_ch', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.KEY_Z,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+Z',
@@ -119,7 +113,7 @@ suite('keyboardMapper - WINDOWS de_ch', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.US_CLOSE_SQUARE_BRACKET,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+^',
@@ -262,7 +256,7 @@ suite('keyboardMapper - WINDOWS de_ch', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.Home,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+Home',
@@ -302,7 +296,7 @@ suite('keyboardMapper - WINDOWS de_ch', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.Ctrl,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+',
@@ -321,15 +315,12 @@ suite('keyboardMapper - WINDOWS en_us', () => {
 
 	let mapper: WindowsKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(true, 'win_en_us').then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		mapper = await createKeyboardMapper(true, 'win_en_us');
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_en_us.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_en_us.txt');
 	});
 
 	test('resolveKeybinding Ctrl+K Ctrl+\\', () => {
@@ -369,7 +360,7 @@ suite('keyboardMapper - WINDOWS en_us', () => {
 		assertResolveUserBinding(
 			mapper,
 			new ScanCodeBinding(true, false, false, false, ScanCode.Comma),
-			null,
+			null!,
 			[{
 				label: 'Ctrl+,',
 				ariaLabel: 'Control+,',
@@ -391,7 +382,7 @@ suite('keyboardMapper - WINDOWS en_us', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.Ctrl,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+',
@@ -410,15 +401,12 @@ suite('keyboardMapper - WINDOWS por_ptb', () => {
 
 	let mapper: WindowsKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'win_por_ptb').then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		mapper = await createKeyboardMapper(false, 'win_por_ptb');
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_por_ptb.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_por_ptb.txt');
 	});
 
 	test('resolveKeyboardEvent Ctrl+[IntlRo]', () => {
@@ -430,7 +418,7 @@ suite('keyboardMapper - WINDOWS por_ptb', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.ABNT_C1,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+/',
@@ -453,7 +441,7 @@ suite('keyboardMapper - WINDOWS por_ptb', () => {
 				altKey: false,
 				metaKey: false,
 				keyCode: KeyCode.ABNT_C2,
-				code: null
+				code: null!
 			},
 			{
 				label: 'Ctrl+.',
@@ -472,15 +460,12 @@ suite('keyboardMapper - WINDOWS ru', () => {
 
 	let mapper: WindowsKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'win_ru').then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		mapper = await createKeyboardMapper(false, 'win_ru');
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_ru.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'win_ru.txt');
 	});
 
 	test('issue ##24361: resolveKeybinding Ctrl+K Ctrl+K', () => {

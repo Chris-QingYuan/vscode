@@ -2,12 +2,9 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import * as nls from 'vs/nls';
-import { TPromise } from 'vs/base/common/winjs.base';
 import { registerEditorAction, ServicesAccessor, EditorAction } from 'vs/editor/browser/editorExtensions';
-import { IQuickOpenService, IPickOpenEntry } from 'vs/platform/quickOpen/common/quickOpen';
 import { IModeService } from 'vs/editor/common/services/modeService';
 import { LanguageId } from 'vs/editor/common/modes';
 import { ICommandService, CommandsRegistry } from 'vs/platform/commands/common/commands';
@@ -15,9 +12,10 @@ import { ISnippetsService } from 'vs/workbench/parts/snippets/electron-browser/s
 import { SnippetController2 } from 'vs/editor/contrib/snippet/snippetController2';
 import { EditorContextKeys } from 'vs/editor/common/editorContextKeys';
 import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
-import { Snippet } from 'vs/workbench/parts/snippets/electron-browser/snippetsFile';
+import { Snippet, SnippetSource } from 'vs/workbench/parts/snippets/electron-browser/snippetsFile';
+import { IQuickPickItem, IQuickInputService, QuickPickInput } from 'vs/platform/quickinput/common/quickInput';
 
-interface ISnippetPick extends IPickOpenEntry {
+interface ISnippetPick extends IQuickPickItem {
 	snippet: Snippet;
 }
 
@@ -43,13 +41,10 @@ class Args {
 	private static readonly _empty = new Args(undefined, undefined, undefined);
 
 	private constructor(
-		public readonly snippet: string,
-		public readonly name: string,
-		public readonly langId: string
-	) {
-
-	}
-
+		public readonly snippet: string | undefined,
+		public readonly name: string | undefined,
+		public readonly langId: string | undefined
+	) { }
 }
 
 class InsertSnippetAction extends EditorAction {
@@ -63,34 +58,38 @@ class InsertSnippetAction extends EditorAction {
 		});
 	}
 
-	public run(accessor: ServicesAccessor, editor: ICodeEditor, arg: any): TPromise<void> {
+	run(accessor: ServicesAccessor, editor: ICodeEditor, arg: any): Promise<void> | undefined {
 		const modeService = accessor.get(IModeService);
 		const snippetService = accessor.get(ISnippetsService);
 
-		if (!editor.getModel()) {
+		if (!editor.hasModel()) {
 			return undefined;
 		}
 
-		const quickOpenService = accessor.get(IQuickOpenService);
+		const quickInputService = accessor.get(IQuickInputService);
 		const { lineNumber, column } = editor.getPosition();
 		let { snippet, name, langId } = Args.fromUser(arg);
 
-		return new TPromise<Snippet>(async (resolve, reject) => {
+		return new Promise<Snippet>(async (resolve, reject) => {
 
 			if (snippet) {
 				return resolve(new Snippet(
-					undefined,
-					undefined,
-					undefined,
-					undefined,
+					[],
+					'',
+					'',
+					'',
 					snippet,
-					undefined
+					'',
+					SnippetSource.User,
 				));
 			}
 
-			let languageId: LanguageId;
+			let languageId = LanguageId.Null;
 			if (langId) {
-				languageId = modeService.getLanguageIdentifier(langId).id;
+				const otherLangId = modeService.getLanguageIdentifier(langId);
+				if (otherLangId) {
+					languageId = otherLangId.id;
+				}
 			} else {
 				editor.getModel().tokenizeIfCheap(lineNumber);
 				languageId = editor.getModel().getLanguageIdAtPosition(lineNumber, column);
@@ -98,8 +97,8 @@ class InsertSnippetAction extends EditorAction {
 				// validate the `languageId` to ensure this is a user
 				// facing language with a name and the chance to have
 				// snippets, else fall back to the outer language
-				const { language } = modeService.getLanguageIdentifier(languageId);
-				if (!modeService.getLanguageName(language)) {
+				const otherLangId = modeService.getLanguageIdentifier(languageId);
+				if (otherLangId && !modeService.getLanguageName(otherLangId.language)) {
 					languageId = editor.getModel().getLanguageIdentifier().id;
 				}
 			}
@@ -116,23 +115,34 @@ class InsertSnippetAction extends EditorAction {
 			} else {
 				// let user pick a snippet
 				const snippets = (await snippetService.getSnippets(languageId)).sort(Snippet.compare);
-				const picks: ISnippetPick[] = [];
-				let prevSnippet: Snippet;
+				const picks: QuickPickInput<ISnippetPick>[] = [];
+				let prevSnippet: Snippet | undefined;
 				for (const snippet of snippets) {
 					const pick: ISnippetPick = {
 						label: snippet.prefix,
 						detail: snippet.description,
 						snippet
 					};
-					if (!snippet.isFromExtension && !prevSnippet) {
-						pick.separator = { label: nls.localize('sep.userSnippet', "User Snippets") };
-					} else if (snippet.isFromExtension && (!prevSnippet || !prevSnippet.isFromExtension)) {
-						pick.separator = { label: nls.localize('sep.extSnippet', "Extension Snippets") };
+					if (!prevSnippet || prevSnippet.snippetSource !== snippet.snippetSource) {
+						let label = '';
+						switch (snippet.snippetSource) {
+							case SnippetSource.User:
+								label = nls.localize('sep.userSnippet', "User Snippets");
+								break;
+							case SnippetSource.Extension:
+								label = nls.localize('sep.extSnippet', "Extension Snippets");
+								break;
+							case SnippetSource.Workspace:
+								label = nls.localize('sep.workspaceSnippet', "Workspace Snippets");
+								break;
+						}
+						picks.push({ type: 'separator', label });
+
 					}
 					picks.push(pick);
 					prevSnippet = snippet;
 				}
-				return quickOpenService.pick(picks, { matchOnDetail: true }).then(pick => resolve(pick && pick.snippet), reject);
+				return quickInputService.pick(picks, { matchOnDetail: true }).then(pick => resolve(pick && pick.snippet), reject);
 			}
 		}).then(snippet => {
 			if (snippet) {

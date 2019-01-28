@@ -5,18 +5,24 @@
 
 import { IViewlet } from 'vs/workbench/common/viewlet';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import Event from 'vs/base/common/event';
-import { TPromise } from 'vs/base/common/winjs.base';
+import { Event } from 'vs/base/common/event';
 import { IPager } from 'vs/base/common/paging';
-import { IQueryOptions, IExtensionManifest, LocalExtensionType, EnablementState, ILocalExtension } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { IQueryOptions, EnablementState, ILocalExtension, IGalleryExtension, IExtensionIdentifier } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { IViewContainersRegistry, ViewContainer, Extensions as ViewContainerExtensions } from 'vs/workbench/common/views';
+import { Registry } from 'vs/platform/registry/common/platform';
+import { CancellationToken } from 'vs/base/common/cancellation';
+import { Disposable } from 'vs/base/common/lifecycle';
+import { areSameExtensions } from 'vs/platform/extensionManagement/common/extensionManagementUtil';
+import { IExtensionManifest, ExtensionType } from 'vs/platform/extensions/common/extensions';
 
 export const VIEWLET_ID = 'workbench.view.extensions';
+export const VIEW_CONTAINER: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer(VIEWLET_ID);
 
 export interface IExtensionsViewlet extends IViewlet {
 	search(text: string): void;
 }
 
-export enum ExtensionState {
+export const enum ExtensionState {
 	Installing,
 	Installed,
 	Uninstalling,
@@ -24,34 +30,37 @@ export enum ExtensionState {
 }
 
 export interface IExtension {
-	type: LocalExtensionType;
+	type?: ExtensionType;
 	state: ExtensionState;
 	name: string;
 	displayName: string;
-	id: string;
-	uuid: string;
+	identifier: IExtensionIdentifier;
 	publisher: string;
 	publisherDisplayName: string;
 	version: string;
 	latestVersion: string;
 	description: string;
-	url: string;
-	repository: string;
+	url?: string;
+	repository?: string;
 	iconUrl: string;
 	iconUrlFallback: string;
-	licenseUrl: string;
-	installCount: number;
-	rating: number;
-	ratingCount: number;
+	licenseUrl?: string;
+	installCount?: number;
+	rating?: number;
+	ratingCount?: number;
 	outdated: boolean;
 	enablementState: EnablementState;
 	dependencies: string[];
+	extensionPack: string[];
 	telemetryData: any;
 	preview: boolean;
-	getManifest(): TPromise<IExtensionManifest>;
-	getReadme(): TPromise<string>;
-	getChangelog(): TPromise<string>;
+	getManifest(token: CancellationToken): Promise<IExtensionManifest | null>;
+	getReadme(token: CancellationToken): Promise<string>;
+	hasReadme(): boolean;
+	getChangelog(token: CancellationToken): Promise<string>;
+	hasChangelog(): boolean;
 	local?: ILocalExtension;
+	gallery?: IGalleryExtension;
 	isMalicious: boolean;
 }
 
@@ -60,7 +69,7 @@ export interface IExtensionDependencies {
 	hasDependencies: boolean;
 	identifier: string;
 	extension: IExtension;
-	dependent: IExtensionDependencies;
+	dependent: IExtensionDependencies | null;
 }
 
 export const SERVICE_ID = 'extensionsWorkbenchService';
@@ -69,25 +78,65 @@ export const IExtensionsWorkbenchService = createDecorator<IExtensionsWorkbenchS
 
 export interface IExtensionsWorkbenchService {
 	_serviceBrand: any;
-	onChange: Event<void>;
+	onChange: Event<IExtension | undefined>;
 	local: IExtension[];
-	queryLocal(): TPromise<IExtension[]>;
-	queryGallery(options?: IQueryOptions): TPromise<IPager<IExtension>>;
+	queryLocal(): Promise<IExtension[]>;
+	queryGallery(options?: IQueryOptions): Promise<IPager<IExtension>>;
 	canInstall(extension: IExtension): boolean;
-	install(vsix: string): TPromise<void>;
-	install(extension: IExtension, promptToInstallDependencies?: boolean): TPromise<void>;
-	uninstall(extension: IExtension): TPromise<void>;
-	setEnablement(extension: IExtension, enablementState: EnablementState): TPromise<void>;
-	loadDependencies(extension: IExtension): TPromise<IExtensionDependencies>;
-	open(extension: IExtension, sideByside?: boolean): TPromise<any>;
-	checkForUpdates(): TPromise<void>;
+	install(vsix: string): Promise<void>;
+	install(extension: IExtension, promptToInstallDependencies?: boolean): Promise<void>;
+	uninstall(extension: IExtension): Promise<void>;
+	installVersion(extension: IExtension, version: string): Promise<void>;
+	reinstall(extension: IExtension): Promise<void>;
+	setEnablement(extensions: IExtension | IExtension[], enablementState: EnablementState): Promise<void>;
+	loadDependencies(extension: IExtension, token: CancellationToken): Promise<IExtensionDependencies | null>;
+	open(extension: IExtension, sideByside?: boolean): Promise<any>;
+	checkForUpdates(): Promise<void>;
 	allowedBadgeProviders: string[];
 }
 
 export const ConfigurationKey = 'extensions';
 export const AutoUpdateConfigurationKey = 'extensions.autoUpdate';
+export const AutoCheckUpdatesConfigurationKey = 'extensions.autoCheckUpdates';
+export const ShowRecommendationsOnlyOnDemandKey = 'extensions.showRecommendationsOnlyOnDemand';
+export const CloseExtensionDetailsOnViewChangeKey = 'extensions.closeExtensionDetailsOnViewChange';
 
 export interface IExtensionsConfiguration {
 	autoUpdate: boolean;
+	autoCheckUpdates: boolean;
 	ignoreRecommendations: boolean;
+	showRecommendationsOnlyOnDemand: boolean;
+	closeExtensionDetailsOnViewChange: boolean;
+}
+
+export interface IExtensionContainer {
+	extension: IExtension | null;
+	update(): void;
+}
+
+export class ExtensionContainers extends Disposable {
+
+	constructor(
+		private readonly containers: IExtensionContainer[],
+		@IExtensionsWorkbenchService extensionsWorkbenchService: IExtensionsWorkbenchService
+	) {
+		super();
+		this._register(extensionsWorkbenchService.onChange(this.update, this));
+	}
+
+	set extension(extension: IExtension) {
+		this.containers.forEach(c => c.extension = extension);
+	}
+
+	private update(extension: IExtension): void {
+		for (const container of this.containers) {
+			if (extension && container.extension) {
+				if (areSameExtensions(container.extension.identifier, extension.identifier)) {
+					container.extension = extension;
+				}
+			} else {
+				container.update();
+			}
+		}
+	}
 }

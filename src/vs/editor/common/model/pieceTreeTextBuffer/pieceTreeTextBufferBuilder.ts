@@ -2,13 +2,12 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import * as strings from 'vs/base/common/strings';
-import { ITextBufferBuilder, DefaultEndOfLine, ITextBufferFactory, ITextBuffer } from 'vs/editor/common/model';
-import { PieceTreeTextBuffer } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer';
-import { StringBuffer, createLineStarts, createLineStartsFast } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase';
 import { CharCode } from 'vs/base/common/charCode';
+import * as strings from 'vs/base/common/strings';
+import { DefaultEndOfLine, ITextBuffer, ITextBufferBuilder, ITextBufferFactory } from 'vs/editor/common/model';
+import { StringBuffer, createLineStarts, createLineStartsFast } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeBase';
+import { PieceTreeTextBuffer } from 'vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBuffer';
 
 export class PieceTreeTextBufferFactory implements ITextBufferFactory {
 
@@ -54,7 +53,7 @@ export class PieceTreeTextBufferFactory implements ITextBufferFactory {
 			}
 		}
 
-		return new PieceTreeTextBuffer(chunks, this._bom, eol, this._containsRTL, this._isBasicASCII);
+		return new PieceTreeTextBuffer(chunks, this._bom, eol, this._containsRTL, this._isBasicASCII, this._normalizeEOL);
 	}
 
 	public getFirstLineText(lengthLimit: number): string {
@@ -104,7 +103,7 @@ export class PieceTreeTextBufferBuilder implements ITextBufferBuilder {
 		}
 
 		const lastChar = chunk.charCodeAt(chunk.length - 1);
-		if (lastChar === CharCode.CarriageReturn || (lastChar >= 0xd800 && lastChar <= 0xdbff)) {
+		if (lastChar === CharCode.CarriageReturn || (lastChar >= 0xD800 && lastChar <= 0xDBFF)) {
 			// last character is \r or a high surrogate => keep it back
 			this._acceptChunk1(chunk.substr(0, chunk.length - 1), false);
 			this._hasPreviousChar = true;

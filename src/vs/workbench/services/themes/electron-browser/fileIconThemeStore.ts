@@ -2,50 +2,54 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
-import nls = require('vs/nls');
+import * as nls from 'vs/nls';
 
 import * as types from 'vs/base/common/types';
-import * as Paths from 'path';
-import { ExtensionsRegistry, ExtensionMessageCollector } from 'vs/platform/extensions/common/extensionsRegistry';
+import * as resources from 'vs/base/common/resources';
+import { ExtensionsRegistry, ExtensionMessageCollector } from 'vs/workbench/services/extensions/common/extensionsRegistry';
 import { ExtensionData, IThemeExtensionPoint } from 'vs/workbench/services/themes/common/workbenchThemeService';
-import { IExtensionService } from 'vs/platform/extensions/common/extensions';
-import { TPromise } from 'vs/base/common/winjs.base';
-import Event, { Emitter } from 'vs/base/common/event';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { Event, Emitter } from 'vs/base/common/event';
 import { FileIconThemeData } from 'vs/workbench/services/themes/electron-browser/fileIconThemeData';
+import { URI } from 'vs/base/common/uri';
 
-let iconThemeExtPoint = ExtensionsRegistry.registerExtensionPoint<IThemeExtensionPoint[]>('iconThemes', [], {
-	description: nls.localize('vscode.extension.contributes.iconThemes', 'Contributes file icon themes.'),
-	type: 'array',
-	items: {
-		type: 'object',
-		defaultSnippets: [{ body: { id: '${1:id}', label: '${2:label}', path: './fileicons/${3:id}-icon-theme.json' } }],
-		properties: {
-			id: {
-				description: nls.localize('vscode.extension.contributes.iconThemes.id', 'Id of the icon theme as used in the user settings.'),
-				type: 'string'
+const iconThemeExtPoint = ExtensionsRegistry.registerExtensionPoint<IThemeExtensionPoint[]>({
+	extensionPoint: 'iconThemes',
+	isDynamic: true,
+	jsonSchema: {
+		description: nls.localize('vscode.extension.contributes.iconThemes', 'Contributes file icon themes.'),
+		type: 'array',
+		items: {
+			type: 'object',
+			defaultSnippets: [{ body: { id: '${1:id}', label: '${2:label}', path: './fileicons/${3:id}-icon-theme.json' } }],
+			properties: {
+				id: {
+					description: nls.localize('vscode.extension.contributes.iconThemes.id', 'Id of the icon theme as used in the user settings.'),
+					type: 'string'
+				},
+				label: {
+					description: nls.localize('vscode.extension.contributes.iconThemes.label', 'Label of the icon theme as shown in the UI.'),
+					type: 'string'
+				},
+				path: {
+					description: nls.localize('vscode.extension.contributes.iconThemes.path', 'Path of the icon theme definition file. The path is relative to the extension folder and is typically \'./icons/awesome-icon-theme.json\'.'),
+					type: 'string'
+				}
 			},
-			label: {
-				description: nls.localize('vscode.extension.contributes.iconThemes.label', 'Label of the icon theme as shown in the UI.'),
-				type: 'string'
-			},
-			path: {
-				description: nls.localize('vscode.extension.contributes.iconThemes.path', 'Path of the icon theme definition file. The path is relative to the extension folder and is typically \'./icons/awesome-icon-theme.json\'.'),
-				type: 'string'
-			}
-		},
-		required: ['path', 'id']
+			required: ['path', 'id']
+		}
 	}
 });
+
 export class FileIconThemeStore {
 
 	private knownIconThemes: FileIconThemeData[];
-	private onDidChangeEmitter: Emitter<FileIconThemeData[]>;
+	private readonly onDidChangeEmitter: Emitter<FileIconThemeData[]>;
 
 	public get onDidChange(): Event<FileIconThemeData[]> { return this.onDidChangeEmitter.event; }
 
-	constructor( @IExtensionService private extensionService: IExtensionService) {
+	constructor(@IExtensionService private readonly extensionService: IExtensionService) {
 		this.knownIconThemes = [];
 		this.onDidChangeEmitter = new Emitter<FileIconThemeData[]>();
 		this.initialize();
@@ -53,20 +57,21 @@ export class FileIconThemeStore {
 
 	private initialize() {
 		iconThemeExtPoint.setHandler((extensions) => {
+			this.knownIconThemes.length = 0;
 			for (let ext of extensions) {
 				let extensionData = {
-					extensionId: ext.description.id,
+					extensionId: ext.description.identifier.value,
 					extensionPublisher: ext.description.publisher,
 					extensionName: ext.description.name,
 					extensionIsBuiltin: ext.description.isBuiltin
 				};
-				this.onIconThemes(ext.description.extensionFolderPath, extensionData, ext.value, ext.collector);
+				this.onIconThemes(ext.description.extensionLocation, extensionData, ext.value, ext.collector);
 			}
 			this.onDidChangeEmitter.fire(this.knownIconThemes);
 		});
 	}
 
-	private onIconThemes(extensionFolderPath: string, extensionData: ExtensionData, iconThemes: IThemeExtensionPoint[], collector: ExtensionMessageCollector): void {
+	private onIconThemes(extensionLocation: URI, extensionData: ExtensionData, iconThemes: IThemeExtensionPoint[], collector: ExtensionMessageCollector): void {
 		if (!Array.isArray(iconThemes)) {
 			collector.error(nls.localize(
 				'reqarray',
@@ -94,41 +99,47 @@ export class FileIconThemeStore {
 				));
 				return;
 			}
-			let normalizedAbsolutePath = Paths.normalize(Paths.join(extensionFolderPath, iconTheme.path));
 
-			if (normalizedAbsolutePath.indexOf(Paths.normalize(extensionFolderPath)) !== 0) {
-				collector.warn(nls.localize('invalid.path.1', "Expected `contributes.{0}.path` ({1}) to be included inside extension's folder ({2}). This might make the extension non-portable.", iconThemeExtPoint.name, normalizedAbsolutePath, extensionFolderPath));
+			const iconThemeLocation = resources.joinPath(extensionLocation, iconTheme.path);
+			if (!resources.isEqualOrParent(iconThemeLocation, extensionLocation)) {
+				collector.warn(nls.localize('invalid.path.1', "Expected `contributes.{0}.path` ({1}) to be included inside extension's folder ({2}). This might make the extension non-portable.", iconThemeExtPoint.name, iconThemeLocation.path, extensionLocation.path));
 			}
 
-			let themeData = FileIconThemeData.fromExtensionTheme(iconTheme, normalizedAbsolutePath, extensionData);
+			let themeData = FileIconThemeData.fromExtensionTheme(iconTheme, iconThemeLocation, extensionData);
 			this.knownIconThemes.push(themeData);
 		});
 
 	}
 
-	public findThemeData(iconTheme: string): TPromise<FileIconThemeData> {
+	public findThemeData(iconTheme: string): Promise<FileIconThemeData | undefined> {
+		if (iconTheme.length === 0) {
+			return Promise.resolve(FileIconThemeData.noIconTheme());
+		}
 		return this.getFileIconThemes().then(allIconSets => {
 			for (let iconSet of allIconSets) {
 				if (iconSet.id === iconTheme) {
 					return iconSet;
 				}
 			}
-			return null;
+			return undefined;
 		});
 	}
 
-	public findThemeBySettingsId(settingsId: string): TPromise<FileIconThemeData> {
+	public findThemeBySettingsId(settingsId: string | null): Promise<FileIconThemeData | undefined> {
+		if (!settingsId) {
+			return Promise.resolve(FileIconThemeData.noIconTheme());
+		}
 		return this.getFileIconThemes().then(allIconSets => {
 			for (let iconSet of allIconSets) {
 				if (iconSet.settingsId === settingsId) {
 					return iconSet;
 				}
 			}
-			return null;
+			return undefined;
 		});
 	}
 
-	public getFileIconThemes(): TPromise<FileIconThemeData[]> {
+	public getFileIconThemes(): Promise<FileIconThemeData[]> {
 		return this.extensionService.whenInstalledExtensionsRegistered().then(isReady => {
 			return this.knownIconThemes;
 		});

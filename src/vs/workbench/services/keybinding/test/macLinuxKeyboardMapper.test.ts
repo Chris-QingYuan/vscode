@@ -3,39 +3,33 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as assert from 'assert';
-import { KeyMod, KeyCode, createKeybinding, SimpleKeybinding, KeyChord } from 'vs/base/common/keyCodes';
-import { MacLinuxKeyboardMapper, IMacLinuxKeyboardMapping } from 'vs/workbench/services/keybinding/common/macLinuxKeyboardMapper';
-import { OperatingSystem } from 'vs/base/common/platform';
+import { KeyChord, KeyCode, KeyMod, SimpleKeybinding, createKeybinding } from 'vs/base/common/keyCodes';
 import { UserSettingsLabelProvider } from 'vs/base/common/keybindingLabels';
+import { OperatingSystem } from 'vs/base/common/platform';
+import { ScanCode, ScanCodeBinding, ScanCodeUtils } from 'vs/base/common/scanCode';
 import { USLayoutResolvedKeybinding } from 'vs/platform/keybinding/common/usLayoutResolvedKeybinding';
-import { ScanCodeUtils, ScanCodeBinding, ScanCode } from 'vs/workbench/services/keybinding/common/scanCode';
-import { TPromise } from 'vs/base/common/winjs.base';
-import { readRawMapping, assertMapping, IResolvedKeybinding, assertResolveKeybinding, assertResolveKeyboardEvent, assertResolveUserBinding } from 'vs/workbench/services/keybinding/test/keyboardMapperTestUtils';
+import { IMacLinuxKeyboardMapping, MacLinuxKeyboardMapper } from 'vs/workbench/services/keybinding/common/macLinuxKeyboardMapper';
+import { IResolvedKeybinding, assertMapping, assertResolveKeybinding, assertResolveKeyboardEvent, assertResolveUserBinding, readRawMapping } from 'vs/workbench/services/keybinding/test/keyboardMapperTestUtils';
 
 const WRITE_FILE_IF_DIFFERENT = false;
 
-function createKeyboardMapper(isUSStandard: boolean, file: string, OS: OperatingSystem): TPromise<MacLinuxKeyboardMapper> {
-	return readRawMapping<IMacLinuxKeyboardMapping>(file).then((rawMappings) => {
-		return new MacLinuxKeyboardMapper(isUSStandard, rawMappings, OS);
-	});
+async function createKeyboardMapper(isUSStandard: boolean, file: string, OS: OperatingSystem): Promise<MacLinuxKeyboardMapper> {
+	const rawMappings = await readRawMapping<IMacLinuxKeyboardMapping>(file);
+	return new MacLinuxKeyboardMapper(isUSStandard, rawMappings, OS);
 }
 
 suite('keyboardMapper - MAC de_ch', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'mac_de_ch', OperatingSystem.Macintosh).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(false, 'mac_de_ch', OperatingSystem.Macintosh);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_de_ch.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_de_ch.txt');
 	});
 
 	function assertKeybindingTranslation(kb: number, expected: string | string[]): void {
@@ -43,7 +37,7 @@ suite('keyboardMapper - MAC de_ch', () => {
 	}
 
 	function _assertResolveKeybinding(k: number, expected: IResolvedKeybinding[]): void {
-		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Macintosh), expected);
+		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Macintosh)!, expected);
 	}
 
 	test('kb => hw', () => {
@@ -378,15 +372,13 @@ suite('keyboardMapper - MAC en_us', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(true, 'mac_en_us', OperatingSystem.Macintosh).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(true, 'mac_en_us', OperatingSystem.Macintosh);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_en_us.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_en_us.txt');
 	});
 
 	test('resolveUserBinding Cmd+[Comma] Cmd+/', () => {
@@ -457,15 +449,13 @@ suite('keyboardMapper - LINUX de_ch', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'linux_de_ch', OperatingSystem.Linux).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(false, 'linux_de_ch', OperatingSystem.Linux);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_de_ch.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_de_ch.txt');
 	});
 
 	function assertKeybindingTranslation(kb: number, expected: string | string[]): void {
@@ -473,7 +463,7 @@ suite('keyboardMapper - LINUX de_ch', () => {
 	}
 
 	function _assertResolveKeybinding(k: number, expected: IResolvedKeybinding[]): void {
-		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux), expected);
+		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux)!, expected);
 	}
 
 	test('kb => hw', () => {
@@ -808,19 +798,17 @@ suite('keyboardMapper - LINUX en_us', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(true, 'linux_en_us', OperatingSystem.Linux).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(true, 'linux_en_us', OperatingSystem.Linux);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_en_us.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_en_us.txt');
 	});
 
 	function _assertResolveKeybinding(k: number, expected: IResolvedKeybinding[]): void {
-		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux), expected);
+		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux)!, expected);
 	}
 
 	test('resolveKeybinding Ctrl+A', () => {
@@ -1236,7 +1224,7 @@ suite('keyboardMapper', () => {
 	test('issue #24064: NumLock/NumPad keys stopped working in 1.11 on Linux', () => {
 		let mapper = new MacLinuxKeyboardMapper(false, {}, OperatingSystem.Linux);
 
-		function assertNumpadKeyboardEvent(keyCode: KeyCode, code: string, label: string, electronAccelerator: string, userSettingsLabel: string, dispatch: string): void {
+		function assertNumpadKeyboardEvent(keyCode: KeyCode, code: string, label: string, electronAccelerator: string | null, userSettingsLabel: string, dispatch: string): void {
 			assertResolveKeyboardEvent(
 				mapper,
 				{
@@ -1263,7 +1251,7 @@ suite('keyboardMapper', () => {
 		assertNumpadKeyboardEvent(KeyCode.DownArrow, 'Numpad2', 'DownArrow', 'Down', 'down', '[ArrowDown]');
 		assertNumpadKeyboardEvent(KeyCode.PageDown, 'Numpad3', 'PageDown', 'PageDown', 'pagedown', '[PageDown]');
 		assertNumpadKeyboardEvent(KeyCode.LeftArrow, 'Numpad4', 'LeftArrow', 'Left', 'left', '[ArrowLeft]');
-		assertNumpadKeyboardEvent(KeyCode.Unknown, 'Numpad5', 'NumPad5', null, 'numpad5', '[Numpad5]');
+		assertNumpadKeyboardEvent(KeyCode.Unknown, 'Numpad5', 'NumPad5', null!, 'numpad5', '[Numpad5]');
 		assertNumpadKeyboardEvent(KeyCode.RightArrow, 'Numpad6', 'RightArrow', 'Right', 'right', '[ArrowRight]');
 		assertNumpadKeyboardEvent(KeyCode.Home, 'Numpad7', 'Home', 'Home', 'home', '[Home]');
 		assertNumpadKeyboardEvent(KeyCode.UpArrow, 'Numpad8', 'UpArrow', 'Up', 'up', '[ArrowUp]');
@@ -1328,19 +1316,17 @@ suite('keyboardMapper - LINUX ru', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'linux_ru', OperatingSystem.Linux).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(false, 'linux_ru', OperatingSystem.Linux);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_ru.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_ru.txt');
 	});
 
 	function _assertResolveKeybinding(k: number, expected: IResolvedKeybinding[]): void {
-		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux), expected);
+		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Linux)!, expected);
 	}
 
 	test('resolveKeybinding Ctrl+S', () => {
@@ -1363,15 +1349,13 @@ suite('keyboardMapper - LINUX en_uk', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'linux_en_uk', OperatingSystem.Linux).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(false, 'linux_en_uk', OperatingSystem.Linux);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_en_uk.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'linux_en_uk.txt');
 	});
 
 	test('issue #24522: resolveKeyboardEvent Ctrl+Alt+[Minus]', () => {
@@ -1402,19 +1386,17 @@ suite('keyboardMapper - MAC zh_hant', () => {
 
 	let mapper: MacLinuxKeyboardMapper;
 
-	suiteSetup((done) => {
-		createKeyboardMapper(false, 'mac_zh_hant', OperatingSystem.Macintosh).then((_mapper) => {
-			mapper = _mapper;
-			done();
-		}, done);
+	suiteSetup(async () => {
+		const _mapper = await createKeyboardMapper(false, 'mac_zh_hant', OperatingSystem.Macintosh);
+		mapper = _mapper;
 	});
 
-	test('mapping', (done) => {
-		assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_zh_hant.txt', done);
+	test('mapping', () => {
+		return assertMapping(WRITE_FILE_IF_DIFFERENT, mapper, 'mac_zh_hant.txt');
 	});
 
 	function _assertResolveKeybinding(k: number, expected: IResolvedKeybinding[]): void {
-		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Macintosh), expected);
+		assertResolveKeybinding(mapper, createKeybinding(k, OperatingSystem.Macintosh)!, expected);
 	}
 
 	test('issue #28237 resolveKeybinding Cmd+C', () => {
@@ -1445,7 +1427,7 @@ function _assertKeybindingTranslation(mapper: MacLinuxKeyboardMapper, OS: Operat
 
 	const runtimeKeybinding = createKeybinding(kb, OS);
 
-	const keybindingLabel = new USLayoutResolvedKeybinding(runtimeKeybinding, OS).getUserSettingsLabel();
+	const keybindingLabel = new USLayoutResolvedKeybinding(runtimeKeybinding!, OS).getUserSettingsLabel();
 
 	const actualHardwareKeypresses = mapper.simpleKeybindingToScanCodeBinding(<SimpleKeybinding>runtimeKeybinding);
 	if (actualHardwareKeypresses.length === 0) {

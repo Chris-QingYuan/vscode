@@ -3,8 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
 import * as assert from 'assert';
 import { MainThreadCommands } from 'vs/workbench/api/electron-browser/mainThreadCommands';
 import { CommandsRegistry } from 'vs/platform/commands/common/commands';
@@ -14,7 +12,7 @@ suite('MainThreadCommands', function () {
 
 	test('dispose on unregister', function () {
 
-		const commands = new MainThreadCommands(SingleProxyRPCProtocol(null), undefined);
+		const commands = new MainThreadCommands(SingleProxyRPCProtocol(null), undefined!);
 		assert.equal(CommandsRegistry.getCommand('foo'), undefined);
 
 		// register
@@ -28,7 +26,7 @@ suite('MainThreadCommands', function () {
 
 	test('unregister all on dispose', function () {
 
-		const commands = new MainThreadCommands(SingleProxyRPCProtocol(null), undefined);
+		const commands = new MainThreadCommands(SingleProxyRPCProtocol(null), undefined!);
 		assert.equal(CommandsRegistry.getCommand('foo'), undefined);
 
 		commands.$registerCommand('foo');

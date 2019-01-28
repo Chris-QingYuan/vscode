@@ -7,13 +7,15 @@ import * as nls from 'vs/nls';
 import * as path from 'path';
 import * as platform from 'vs/base/common/platform';
 import * as pfs from 'vs/base/node/pfs';
-import Uri from 'vs/base/common/uri';
+import { URI as Uri } from 'vs/base/common/uri';
 import { dispose, IDisposable } from 'vs/base/common/lifecycle';
 import { IOpenerService } from 'vs/platform/opener/common/opener';
 import { TerminalWidgetManager } from 'vs/workbench/parts/terminal/browser/terminalWidgetManager';
-import { TPromise } from 'vs/base/common/winjs.base';
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { ITerminalService } from 'vs/workbench/parts/terminal/common/terminal';
+import { ITextEditorSelection } from 'vs/platform/editor/common/editor';
+import { IEditorService } from 'vs/workbench/services/editor/common/editorService';
+import { ILinkMatcherOptions } from 'vscode-xterm';
 
 const pathPrefix = '(\\.\\.?|\\~)';
 const pathSeparatorClause = '\\/';
@@ -59,53 +61,86 @@ export class TerminalLinkHandler {
 	private _hoverDisposables: IDisposable[] = [];
 	private _mouseMoveDisposable: IDisposable;
 	private _widgetManager: TerminalWidgetManager;
-
+	private _processCwd: string;
 	private _localLinkPattern: RegExp;
 
 	constructor(
 		private _xterm: any,
 		private _platform: platform.Platform,
-		private _initialCwd: string,
-		@IOpenerService private _openerService: IOpenerService,
-		@IConfigurationService private _configurationService: IConfigurationService,
-		@ITerminalService private _terminalService: ITerminalService
+		@IOpenerService private readonly _openerService: IOpenerService,
+		@IEditorService private readonly _editorService: IEditorService,
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@ITerminalService private readonly _terminalService: ITerminalService,
 	) {
 		const baseLocalLinkClause = _platform === platform.Platform.Windows ? winLocalLinkClause : unixLocalLinkClause;
 		// Append line and column number regex
 		this._localLinkPattern = new RegExp(`${baseLocalLinkClause}(${lineAndColumnClause})`);
-
-		this._xterm.setHypertextLinkHandler(this._wrapLinkHandler(uri => {
-			this._handleHypertextLink(uri);
-		}));
-
-		this._xterm.setHypertextValidationCallback((uri: string, callback: (isValid: boolean) => void) => {
-			this._validateWebLink(uri, callback);
-		});
+		this.registerWebLinkHandler();
+		this.registerLocalLinkHandler();
 	}
 
 	public setWidgetManager(widgetManager: TerminalWidgetManager): void {
 		this._widgetManager = widgetManager;
 	}
 
+	public set processCwd(processCwd: string) {
+		this._processCwd = processCwd;
+	}
+
 	public registerCustomLinkHandler(regex: RegExp, handler: (uri: string) => void, matchIndex?: number, validationCallback?: XtermLinkMatcherValidationCallback): number {
-		return this._xterm.registerLinkMatcher(regex, this._wrapLinkHandler(handler), {
+		const options: ILinkMatcherOptions = {
 			matchIndex,
-			validationCallback: (uri: string, callback: (isValid: boolean) => void) => validationCallback(uri, callback),
-			tooltipCallback: (e: MouseEvent, u) => this._widgetManager.showMessage(e.offsetX, e.offsetY, this._getLinkHoverString()),
+			tooltipCallback: (e: MouseEvent) => {
+				if (this._terminalService && this._terminalService.configHelper.config.rendererType === 'dom') {
+					const target = (e.target as HTMLElement);
+					this._widgetManager.showMessage(target.offsetLeft, target.offsetTop, this._getLinkHoverString());
+				} else {
+					this._widgetManager.showMessage(e.offsetX, e.offsetY, this._getLinkHoverString());
+				}
+			},
 			leaveCallback: () => this._widgetManager.closeMessage(),
 			willLinkActivate: (e: MouseEvent) => this._isLinkActivationModifierDown(e),
 			priority: CUSTOM_LINK_PRIORITY
+		};
+		if (validationCallback) {
+			options.validationCallback = (uri: string, callback: (isValid: boolean) => void) => validationCallback(uri, callback);
+		}
+		return this._xterm.registerLinkMatcher(regex, this._wrapLinkHandler(handler), options);
+	}
+
+	public registerWebLinkHandler(): void {
+		const wrappedHandler = this._wrapLinkHandler(uri => {
+			this._handleHypertextLink(uri);
+		});
+		this._xterm.webLinksInit(wrappedHandler, {
+			validationCallback: (uri: string, callback: (isValid: boolean) => void) => this._validateWebLink(uri, callback),
+			tooltipCallback: (e: MouseEvent) => {
+				if (this._terminalService && this._terminalService.configHelper.config.rendererType === 'dom') {
+					const target = (e.target as HTMLElement);
+					this._widgetManager.showMessage(target.offsetLeft, target.offsetTop, this._getLinkHoverString());
+				} else {
+					this._widgetManager.showMessage(e.offsetX, e.offsetY, this._getLinkHoverString());
+				}
+			},
+			leaveCallback: () => this._widgetManager.closeMessage(),
+			willLinkActivate: (e: MouseEvent) => this._isLinkActivationModifierDown(e)
 		});
 	}
 
-	public registerLocalLinkHandler(): number {
+	public registerLocalLinkHandler(): void {
 		const wrappedHandler = this._wrapLinkHandler(url => {
 			this._handleLocalLink(url);
 		});
-
-		return this._xterm.registerLinkMatcher(this._localLinkRegex, wrappedHandler, {
+		this._xterm.registerLinkMatcher(this._localLinkRegex, wrappedHandler, {
 			validationCallback: (uri: string, callback: (isValid: boolean) => void) => this._validateLocalLink(uri, callback),
-			tooltipCallback: (e: MouseEvent, u) => this._widgetManager.showMessage(e.offsetX, e.offsetY, this._getLinkHoverString()),
+			tooltipCallback: (e: MouseEvent) => {
+				if (this._terminalService && this._terminalService.configHelper.config.rendererType === 'dom') {
+					const target = (e.target as HTMLElement);
+					this._widgetManager.showMessage(target.offsetLeft, target.offsetTop, this._getLinkHoverString());
+				} else {
+					this._widgetManager.showMessage(e.offsetX, e.offsetY, this._getLinkHoverString());
+				}
+			},
 			leaveCallback: () => this._widgetManager.closeMessage(),
 			willLinkActivate: (e: MouseEvent) => this._isLinkActivationModifierDown(e),
 			priority: LOCAL_LINK_PRIORITY
@@ -113,6 +148,7 @@ export class TerminalLinkHandler {
 	}
 
 	public dispose(): void {
+		this._xterm = null;
 		this._hoverDisposables = dispose(this._hoverDisposables);
 		this._mouseMoveDisposable = dispose(this._mouseMoveDisposable);
 	}
@@ -125,7 +161,7 @@ export class TerminalLinkHandler {
 			if (!this._isLinkActivationModifierDown(event)) {
 				// If the modifier is not pressed, the terminal should be
 				// focused if it's not already
-				this._terminalService.getActiveInstance().focus(true);
+				this._terminalService.getActiveInstance()!.focus(true);
 				return false;
 			}
 			return handler(uri);
@@ -136,23 +172,24 @@ export class TerminalLinkHandler {
 		return this._localLinkPattern;
 	}
 
-	private _handleLocalLink(link: string): TPromise<void> {
+	private _handleLocalLink(link: string): PromiseLike<any> {
 		return this._resolvePath(link).then(resolvedLink => {
 			if (!resolvedLink) {
-				return void 0;
+				return Promise.resolve(null);
 			}
-
-			let normalizedPath = path.normalize(path.resolve(resolvedLink));
+			const normalizedPath = path.normalize(path.resolve(resolvedLink));
 			const normalizedUrl = this.extractLinkUrl(normalizedPath);
+			if (!normalizedUrl) {
+				return Promise.resolve(null);
+			}
+			const resource = Uri.file(normalizedUrl);
+			const lineColumnInfo: LineColumnInfo = this.extractLineColumnInfo(link);
+			const selection: ITextEditorSelection = {
+				startLineNumber: lineColumnInfo.lineNumber,
+				startColumn: lineColumnInfo.columnNumber
+			};
 
-			normalizedPath = this._formatLocalLinkPath(normalizedPath);
-
-			let resource = Uri.file(normalizedUrl);
-			resource = resource.with({
-				fragment: Uri.parse(normalizedPath).fragment
-			});
-
-			return this._openerService.open(resource);
+			return this._editorService.openEditor({ resource, options: { pinned: true, selection } });
 		});
 	}
 
@@ -165,7 +202,7 @@ export class TerminalLinkHandler {
 	}
 
 	private _handleHypertextLink(url: string): void {
-		let uri = Uri.parse(url);
+		const uri = Uri.parse(url);
 		this._openerService.open(uri);
 	}
 
@@ -188,7 +225,7 @@ export class TerminalLinkHandler {
 		return nls.localize('terminalLinkHandler.followLinkCtrl', 'Ctrl + click to follow link');
 	}
 
-	protected _preprocessPath(link: string): string {
+	protected _preprocessPath(link: string): string | null {
 		if (this._platform === platform.Platform.Windows) {
 			// Resolve ~ -> %HOMEDRIVE%\%HOMEPATH%
 			if (link.charAt(0) === '~') {
@@ -200,59 +237,42 @@ export class TerminalLinkHandler {
 
 			// Resolve relative paths (.\a, ..\a, ~\a, a\b)
 			if (!link.match('^' + winDrivePrefix)) {
-				if (!this._initialCwd) {
+				if (!this._processCwd) {
 					// Abort if no workspace is open
 					return null;
 				}
-				link = path.join(this._initialCwd, link);
+				link = path.join(this._processCwd, link);
 			}
 		}
 		// Resolve workspace path . | .. | <relative_path> -> <path>/. | <path>/.. | <path>/<relative_path>
 		else if (link.charAt(0) !== '/' && link.charAt(0) !== '~') {
-			if (!this._initialCwd) {
+			if (!this._processCwd) {
 				// Abort if no workspace is open
 				return null;
 			}
-			link = path.join(this._initialCwd, link);
+			link = path.join(this._processCwd, link);
 		}
 		return link;
 	}
 
-	private _resolvePath(link: string): TPromise<string> {
-		link = this._preprocessPath(link);
-		if (!link) {
-			return TPromise.as(void 0);
+	private _resolvePath(link: string): PromiseLike<string | null> {
+		const preprocessedLink = this._preprocessPath(link);
+		if (!preprocessedLink) {
+			return Promise.resolve(null);
 		}
 
-		const linkUrl = this.extractLinkUrl(link);
+		const linkUrl = this.extractLinkUrl(preprocessedLink);
 		if (!linkUrl) {
-			return TPromise.as(void 0);
+			return Promise.resolve(null);
 		}
 
-		// Open an editor if the path exists
+		// Ensure the file exists on disk, so an editor can be opened after clicking it
 		return pfs.fileExists(linkUrl).then(isFile => {
 			if (!isFile) {
 				return null;
 			}
-			return link;
+			return preprocessedLink;
 		});
-	}
-
-	/**
-	 * Appends line number and column number to link if they exists.
-	 * @param link link to format, will become link#line_num,col_num.
-	 */
-	private _formatLocalLinkPath(link: string): string {
-		const lineColumnInfo: LineColumnInfo = this.extractLineColumnInfo(link);
-		if (lineColumnInfo.lineNumber) {
-			link += `#${lineColumnInfo.lineNumber}`;
-
-			if (lineColumnInfo.columnNumber) {
-				link += `,${lineColumnInfo.columnNumber}`;
-			}
-		}
-
-		return link;
 	}
 
 	/**
@@ -261,19 +281,26 @@ export class TerminalLinkHandler {
 	 * @param link Url link which may contain line and column number.
 	 */
 	public extractLineColumnInfo(link: string): LineColumnInfo {
-		const matches: string[] = this._localLinkRegex.exec(link);
-		const lineColumnInfo: LineColumnInfo = {};
-		const lineAndColumnMatchIndex = this._platform === platform.Platform.Windows ? winLineAndColumnMatchIndex : unixLineAndColumnMatchIndex;
+		const matches: string[] | null = this._localLinkRegex.exec(link);
+		const lineColumnInfo: LineColumnInfo = {
+			lineNumber: 1,
+			columnNumber: 1
+		};
 
+		if (!matches) {
+			return lineColumnInfo;
+		}
+
+		const lineAndColumnMatchIndex = this._platform === platform.Platform.Windows ? winLineAndColumnMatchIndex : unixLineAndColumnMatchIndex;
 		for (let i = 0; i < lineAndColumnClause.length; i++) {
 			const lineMatchIndex = lineAndColumnMatchIndex + (lineAndColumnClauseGroupCount * i);
 			const rowNumber = matches[lineMatchIndex];
 			if (rowNumber) {
-				lineColumnInfo['lineNumber'] = rowNumber;
+				lineColumnInfo['lineNumber'] = parseInt(rowNumber, 10);
 				// Check if column number exists
 				const columnNumber = matches[lineMatchIndex + 2];
 				if (columnNumber) {
-					lineColumnInfo['columnNumber'] = columnNumber;
+					lineColumnInfo['columnNumber'] = parseInt(columnNumber, 10);
 				}
 				break;
 			}
@@ -287,8 +314,8 @@ export class TerminalLinkHandler {
 	 *
 	 * @param link url link which may contain line and column number.
 	 */
-	public extractLinkUrl(link: string): string {
-		const matches: string[] = this._localLinkRegex.exec(link);
+	public extractLinkUrl(link: string): string | null {
+		const matches: string[] | null = this._localLinkRegex.exec(link);
 		if (!matches) {
 			return null;
 		}
@@ -297,6 +324,6 @@ export class TerminalLinkHandler {
 }
 
 export interface LineColumnInfo {
-	lineNumber?: string;
-	columnNumber?: string;
+	lineNumber: number;
+	columnNumber: number;
 }

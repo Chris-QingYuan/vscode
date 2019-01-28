@@ -2,11 +2,9 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import { ICommandService, CommandsRegistry, ICommandHandlerDescription } from 'vs/platform/commands/common/commands';
 import { IDisposable } from 'vs/base/common/lifecycle';
-import { TPromise } from 'vs/base/common/winjs.base';
 import { ExtHostContext, MainThreadCommandsShape, ExtHostCommandsShape, MainContext, IExtHostContext } from '../node/extHost.protocol';
 import { extHostNamedCustomer } from 'vs/workbench/api/electron-browser/extHostCustomers';
 import { revive } from 'vs/base/common/marshalling';
@@ -34,7 +32,7 @@ export class MainThreadCommands implements MainThreadCommandsShape {
 		this._generateCommandsDocumentationRegistration.dispose();
 	}
 
-	private _generateCommandsDocumentation(): Thenable<void> {
+	private _generateCommandsDocumentation(): Promise<void> {
 		return this._proxy.$getContributedCommandHandlerDescriptions().then(result => {
 			// add local commands
 			const commands = CommandsRegistry.getCommands();
@@ -72,15 +70,15 @@ export class MainThreadCommands implements MainThreadCommandsShape {
 		}
 	}
 
-	$executeCommand<T>(id: string, args: any[]): Thenable<T> {
+	$executeCommand<T>(id: string, args: any[]): Promise<T> {
 		for (let i = 0; i < args.length; i++) {
 			args[i] = revive(args[i], 0);
 		}
 		return this._commandService.executeCommand<T>(id, ...args);
 	}
 
-	$getCommands(): Thenable<string[]> {
-		return TPromise.as(Object.keys(CommandsRegistry.getCommands()));
+	$getCommands(): Promise<string[]> {
+		return Promise.resolve(Object.keys(CommandsRegistry.getCommands()));
 	}
 }
 
@@ -94,11 +92,11 @@ function _generateMarkdown(description: string | ICommandHandlerDescription): st
 		parts.push('\n\n');
 		if (description.args) {
 			for (let arg of description.args) {
-				parts.push(`* _${arg.name}_ ${arg.description || ''}\n`);
+				parts.push(`* _${arg.name}_ - ${arg.description || ''}\n`);
 			}
 		}
 		if (description.returns) {
-			parts.push(`* _(returns)_ ${description.returns}`);
+			parts.push(`* _(returns)_ - ${description.returns}`);
 		}
 		parts.push('\n\n');
 		return parts.join('');

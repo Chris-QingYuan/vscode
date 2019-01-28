@@ -66,13 +66,12 @@ addSettingMapping('rangeHighlight', editorColorRegistry.editorRangeHighlight);
 addSettingMapping('caret', editorColorRegistry.editorCursorForeground);
 addSettingMapping('invisibles', editorColorRegistry.editorWhitespaces);
 addSettingMapping('guide', editorColorRegistry.editorIndentGuides);
+addSettingMapping('activeGuide', editorColorRegistry.editorActiveIndentGuides);
 
 const ansiColorMap = ['ansiBlack', 'ansiRed', 'ansiGreen', 'ansiYellow', 'ansiBlue', 'ansiMagenta', 'ansiCyan', 'ansiWhite',
 	'ansiBrightBlack', 'ansiBrightRed', 'ansiBrightGreen', 'ansiBrightYellow', 'ansiBrightBlue', 'ansiBrightMagenta', 'ansiBrightCyan', 'ansiBrightWhite'
 ];
 
-for (let i = 0; i < ansiColorMap.length; i++) {
-	addSettingMapping(ansiColorMap[i], 'terminal.' + ansiColorMap[i]);
+for (const color of ansiColorMap) {
+	addSettingMapping(color, 'terminal.' + color);
 }
-
-

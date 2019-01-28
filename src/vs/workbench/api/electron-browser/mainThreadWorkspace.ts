@@ -2,27 +2,34 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import { isPromiseCanceledError } from 'vs/base/common/errors';
-import URI, { UriComponents } from 'vs/base/common/uri';
-import { ISearchService, QueryType, ISearchQuery, IFolderQuery, ISearchConfiguration } from 'vs/platform/search/common/search';
-import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
-import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
-import { TPromise } from 'vs/base/common/winjs.base';
-import { MainThreadWorkspaceShape, ExtHostWorkspaceShape, ExtHostContext, MainContext, IExtHostContext } from '../node/extHost.protocol';
-import { IDisposable, dispose } from 'vs/base/common/lifecycle';
-import { extHostNamedCustomer } from 'vs/workbench/api/electron-browser/extHostCustomers';
-import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
-import { IWorkspaceEditingService } from 'vs/workbench/services/workspace/common/workspaceEditing';
+import { dispose, IDisposable } from 'vs/base/common/lifecycle';
+import { URI, UriComponents } from 'vs/base/common/uri';
 import { localize } from 'vs/nls';
+import { CommandsRegistry } from 'vs/platform/commands/common/commands';
+import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
+import { IInstantiationService, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
+import { ILabelService } from 'vs/platform/label/common/label';
+import { IFolderQuery, IPatternInfo, ISearchConfiguration, ISearchProgressItem, ISearchService, QueryType, IFileQuery, IFileMatch } from 'vs/platform/search/common/search';
 import { IStatusbarService } from 'vs/platform/statusbar/common/statusbar';
+import { IWindowService } from 'vs/platform/windows/common/windows';
+import { IWorkspaceContextService, WorkbenchState } from 'vs/platform/workspace/common/workspace';
+import { extHostNamedCustomer } from 'vs/workbench/api/electron-browser/extHostCustomers';
+import { QueryBuilder, ITextQueryBuilderOptions } from 'vs/workbench/parts/search/common/queryBuilder';
+import { IExtensionService } from 'vs/workbench/services/extensions/common/extensions';
+import { ITextFileService } from 'vs/workbench/services/textfile/common/textfiles';
+import { IWorkspaceEditingService } from 'vs/workbench/services/workspace/common/workspaceEditing';
+import { ExtHostContext, ExtHostWorkspaceShape, IExtHostContext, MainContext, MainThreadWorkspaceShape } from '../node/extHost.protocol';
+import { CancellationTokenSource, CancellationToken } from 'vs/base/common/cancellation';
+import { TextSearchComplete } from 'vscode';
+import { ExtensionIdentifier } from 'vs/platform/extensions/common/extensions';
 
 @extHostNamedCustomer(MainContext.MainThreadWorkspace)
 export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 
 	private readonly _toDispose: IDisposable[] = [];
-	private readonly _activeSearches: { [id: number]: TPromise<URI[]> } = Object.create(null);
+	private readonly _activeCancelTokens: { [id: number]: CancellationTokenSource } = Object.create(null);
 	private readonly _proxy: ExtHostWorkspaceShape;
 
 	constructor(
@@ -30,9 +37,12 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 		@ISearchService private readonly _searchService: ISearchService,
 		@IWorkspaceContextService private readonly _contextService: IWorkspaceContextService,
 		@ITextFileService private readonly _textFileService: ITextFileService,
-		@IConfigurationService private _configurationService: IConfigurationService,
-		@IWorkspaceEditingService private _workspaceEditingService: IWorkspaceEditingService,
-		@IStatusbarService private _statusbarService: IStatusbarService
+		@IConfigurationService private readonly _configurationService: IConfigurationService,
+		@IWorkspaceEditingService private readonly _workspaceEditingService: IWorkspaceEditingService,
+		@IStatusbarService private readonly _statusbarService: IStatusbarService,
+		@IWindowService private readonly _windowService: IWindowService,
+		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		@ILabelService private readonly _labelService: ILabelService
 	) {
 		this._proxy = extHostContext.getProxy(ExtHostContext.ExtHostWorkspace);
 		this._contextService.onDidChangeWorkspaceFolders(this._onDidChangeWorkspace, this, this._toDispose);
@@ -42,15 +52,15 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 	dispose(): void {
 		dispose(this._toDispose);
 
-		for (let requestId in this._activeSearches) {
-			const search = this._activeSearches[requestId];
-			search.cancel();
+		for (let requestId in this._activeCancelTokens) {
+			const tokenSource = this._activeCancelTokens[requestId];
+			tokenSource.cancel();
 		}
 	}
 
 	// --- workspace ---
 
-	$updateWorkspaceFolders(extensionName: string, index: number, deleteCount: number, foldersToAdd: { uri: UriComponents, name?: string }[]): Thenable<void> {
+	$updateWorkspaceFolders(extensionName: string, index: number, deleteCount: number, foldersToAdd: { uri: UriComponents, name?: string }[]): Promise<void> {
 		const workspaceFoldersToAdd = foldersToAdd.map(f => ({ uri: URI.revive(f.uri), name: f.name }));
 
 		// Indicate in status message
@@ -59,7 +69,7 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 		return this._workspaceEditingService.updateFolders(index, deleteCount, workspaceFoldersToAdd, true);
 	}
 
-	private getStatusMessage(extensionName, addCount: number, removeCount: number): string {
+	private getStatusMessage(extensionName: string, addCount: number, removeCount: number): string {
 		let message: string;
 
 		const wantsToAdd = addCount > 0;
@@ -92,20 +102,27 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 	}
 
 	private _onDidChangeWorkspace(): void {
-		this._proxy.$acceptWorkspaceData(this._contextService.getWorkbenchState() === WorkbenchState.EMPTY ? null : this._contextService.getWorkspace());
+		const workspace = this._contextService.getWorkbenchState() === WorkbenchState.EMPTY ? null : this._contextService.getWorkspace();
+		this._proxy.$acceptWorkspaceData(workspace ? {
+			configuration: workspace.configuration,
+			folders: workspace.folders,
+			id: workspace.id,
+			name: this._labelService.getWorkspaceLabel(workspace)
+		} : null);
 	}
 
 	// --- search ---
 
-	$startSearch(includePattern: string, includeFolder: string, excludePatternOrDisregardExcludes: string | false, maxResults: number, requestId: number): Thenable<URI[]> {
+	$startFileSearch(includePattern: string, _includeFolder: UriComponents, excludePatternOrDisregardExcludes: string | false, maxResults: number, token: CancellationToken): Promise<URI[]> {
+		const includeFolder = URI.revive(_includeFolder);
 		const workspace = this._contextService.getWorkspace();
 		if (!workspace.folders.length) {
 			return undefined;
 		}
 
 		let folderQueries: IFolderQuery[];
-		if (typeof includeFolder === 'string') {
-			folderQueries = [{ folder: URI.file(includeFolder) }]; // if base provided, only search in that folder
+		if (includeFolder) {
+			folderQueries = [{ folder: includeFolder }]; // if base provided, only search in that folder
 		} else {
 			folderQueries = workspace.folders.map(folder => ({ folder: folder.uri })); // absolute pattern: search across all folders
 		}
@@ -114,59 +131,119 @@ export class MainThreadWorkspace implements MainThreadWorkspaceShape {
 			return undefined; // invalid query parameters
 		}
 
-		const useRipgrep = folderQueries.every(folderQuery => {
-			const folderConfig = this._configurationService.getValue<ISearchConfiguration>({ resource: folderQuery.folder });
-			return folderConfig.search.useRipgrep;
-		});
-
 		const ignoreSymlinks = folderQueries.every(folderQuery => {
 			const folderConfig = this._configurationService.getValue<ISearchConfiguration>({ resource: folderQuery.folder });
 			return !folderConfig.search.followSymlinks;
 		});
 
-		const query: ISearchQuery = {
+		// TODO replace wth QueryBuilder
+		folderQueries.forEach(fq => {
+			fq.ignoreSymlinks = ignoreSymlinks;
+		});
+
+		const query: IFileQuery = {
 			folderQueries,
 			type: QueryType.File,
 			maxResults,
-			includePattern: { [typeof includePattern === 'string' ? includePattern : undefined]: true },
-			excludePattern: { [typeof excludePatternOrDisregardExcludes === 'string' ? excludePatternOrDisregardExcludes : undefined]: true },
 			disregardExcludeSettings: excludePatternOrDisregardExcludes === false,
-			useRipgrep,
-			ignoreSymlinks
+			_reason: 'startFileSearch'
 		};
+		if (typeof includePattern === 'string') {
+			query.includePattern = { [includePattern]: true };
+		}
+
+		if (typeof excludePatternOrDisregardExcludes === 'string') {
+			query.excludePattern = { [excludePatternOrDisregardExcludes]: true };
+		}
+
 		this._searchService.extendQuery(query);
 
-		const search = this._searchService.search(query).then(result => {
+		return this._searchService.fileSearch(query, token).then(result => {
 			return result.results.map(m => m.resource);
 		}, err => {
 			if (!isPromiseCanceledError(err)) {
-				return TPromise.wrapError(err);
+				return Promise.reject(err);
 			}
 			return undefined;
 		});
+	}
 
-		this._activeSearches[requestId] = search;
-		const onDone = () => delete this._activeSearches[requestId];
-		search.done(onDone, onDone);
+	$startTextSearch(pattern: IPatternInfo, options: ITextQueryBuilderOptions, requestId: number, token: CancellationToken): Promise<TextSearchComplete> {
+		const workspace = this._contextService.getWorkspace();
+		const folders = workspace.folders.map(folder => folder.uri);
+
+		const queryBuilder = this._instantiationService.createInstance(QueryBuilder);
+		const query = queryBuilder.text(pattern, folders, options);
+		query._reason = 'startTextSearch';
+
+		const onProgress = (p: ISearchProgressItem) => {
+			if ((<IFileMatch>p).results) {
+				this._proxy.$handleTextSearchResult(<IFileMatch>p, requestId);
+			}
+		};
+
+		const search = this._searchService.textSearch(query, token, onProgress).then(
+			result => {
+				return { limitHit: result.limitHit };
+			},
+			err => {
+				if (!isPromiseCanceledError(err)) {
+					return Promise.reject(err);
+				}
+
+				return undefined;
+			});
 
 		return search;
 	}
 
-	$cancelSearch(requestId: number): Thenable<boolean> {
-		const search = this._activeSearches[requestId];
-		if (search) {
-			delete this._activeSearches[requestId];
-			search.cancel();
-			return TPromise.as(true);
-		}
-		return undefined;
+	$checkExists(includes: string[], token: CancellationToken): Promise<boolean> {
+		const queryBuilder = this._instantiationService.createInstance(QueryBuilder);
+		const folders = this._contextService.getWorkspace().folders.map(folder => folder.uri);
+		const query = queryBuilder.file(folders, {
+			_reason: 'checkExists',
+			includePattern: includes.join(', '),
+			exists: true
+		});
+
+		return this._searchService.fileSearch(query, token).then(
+			result => {
+				return result.limitHit;
+			},
+			err => {
+				if (!isPromiseCanceledError(err)) {
+					return Promise.reject(err);
+				}
+
+				return undefined;
+			});
 	}
 
 	// --- save & edit resources ---
 
-	$saveAll(includeUntitled?: boolean): Thenable<boolean> {
+	$saveAll(includeUntitled?: boolean): Promise<boolean> {
 		return this._textFileService.saveAll(includeUntitled).then(result => {
 			return result.results.every(each => each.success === true);
 		});
 	}
+
+	$resolveProxy(url: string): Promise<string> {
+		return this._windowService.resolveProxy(url);
+	}
 }
+
+CommandsRegistry.registerCommand('_workbench.enterWorkspace', async function (accessor: ServicesAccessor, workspace: URI, disableExtensions: string[]) {
+	const workspaceEditingService = accessor.get(IWorkspaceEditingService);
+	const extensionService = accessor.get(IExtensionService);
+	const windowService = accessor.get(IWindowService);
+
+	if (disableExtensions && disableExtensions.length) {
+		const runningExtensions = await extensionService.getExtensions();
+		// If requested extension to disable is running, then reload window with given workspace
+		if (disableExtensions && runningExtensions.some(runningExtension => disableExtensions.some(id => ExtensionIdentifier.equals(runningExtension.identifier, id)))) {
+			return windowService.openWindow([URI.file(workspace.fsPath)], { args: { _: [], 'disable-extension': disableExtensions } });
+		}
+	}
+
+	return workspaceEditingService.enterWorkspace(workspace);
+});

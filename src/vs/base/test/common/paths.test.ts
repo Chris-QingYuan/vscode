@@ -2,28 +2,40 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
-
 import * as assert from 'assert';
-import paths = require('vs/base/common/paths');
-import platform = require('vs/base/common/platform');
+import * as paths from 'vs/base/common/paths';
+import * as platform from 'vs/base/common/platform';
 
 suite('Paths', () => {
 
-	test('dirname', () => {
-		assert.equal(paths.dirname('foo/bar'), 'foo');
-		assert.equal(paths.dirname('foo\\bar'), 'foo');
-		assert.equal(paths.dirname('/foo/bar'), '/foo');
-		assert.equal(paths.dirname('\\foo\\bar'), '\\foo');
-		assert.equal(paths.dirname('/foo'), '/');
-		assert.equal(paths.dirname('\\foo'), '\\');
-		assert.equal(paths.dirname('/'), '/');
-		assert.equal(paths.dirname('\\'), '\\');
-		assert.equal(paths.dirname('foo'), '.');
-		if (platform.isWindows) {
-			assert.equal(paths.dirname('c:\\some\\file.txt'), 'c:\\some');
-			assert.equal(paths.dirname('c:\\some'), 'c:\\');
+	function assertDirname(path: string, expected: string, win = false) {
+		const actual = paths.dirname(path, win ? '\\' : '/');
+
+		if (actual !== expected) {
+			assert.fail(`${path}: expected: ${expected}, ours: ${actual}`);
 		}
+	}
+
+	test('dirname', () => {
+		assertDirname('foo/bar', 'foo');
+		assertDirname('foo\\bar', 'foo', true);
+		assertDirname('/foo/bar', '/foo');
+		assertDirname('\\foo\\bar', '\\foo', true);
+		assertDirname('/foo', '/');
+		assertDirname('\\foo', '\\', true);
+		assertDirname('/', '/');
+		assertDirname('\\', '\\', true);
+		assertDirname('foo', '.');
+		assertDirname('f', '.');
+		assertDirname('f/', '.');
+		assertDirname('/folder/', '/');
+		assertDirname('c:\\some\\file.txt', 'c:\\some', true);
+		assertDirname('c:\\some', 'c:\\', true);
+		assertDirname('c:\\', 'c:\\', true);
+		assertDirname('c:', 'c:', true);
+		assertDirname('\\\\server\\share\\some\\path', '\\\\server\\share\\some', true);
+		assertDirname('\\\\server\\share\\some', '\\\\server\\share\\', true);
+		assertDirname('\\\\server\\share\\', '\\\\server\\share\\', true);
 	});
 
 	test('normalize', () => {

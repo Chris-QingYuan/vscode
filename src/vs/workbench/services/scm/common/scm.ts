@@ -3,19 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
-import { TPromise } from 'vs/base/common/winjs.base';
-import URI from 'vs/base/common/uri';
+import { URI } from 'vs/base/common/uri';
 import { createDecorator } from 'vs/platform/instantiation/common/instantiation';
-import Event from 'vs/base/common/event';
+import { Event } from 'vs/base/common/event';
 import { IDisposable } from 'vs/base/common/lifecycle';
 import { Command } from 'vs/editor/common/modes';
 import { ColorIdentifier } from 'vs/platform/theme/common/colorRegistry';
 import { ISequence } from 'vs/base/common/sequence';
 
 export interface IBaselineResourceProvider {
-	getBaselineResource(resource: URI): TPromise<URI>;
+	getBaselineResource(resource: URI): Promise<URI>;
 }
 
 export const ISCMService = createDecorator<ISCMService>('scm');
@@ -36,7 +33,7 @@ export interface ISCMResource {
 	readonly resourceGroup: ISCMResourceGroup;
 	readonly sourceUri: URI;
 	readonly decorations: ISCMResourceDecorations;
-	open(): TPromise<void>;
+	open(): Promise<void>;
 }
 
 export interface ISCMResourceGroup extends ISequence<ISCMResource> {
@@ -61,14 +58,15 @@ export interface ISCMProvider extends IDisposable {
 	readonly count?: number;
 	readonly commitTemplate?: string;
 	readonly onDidChangeCommitTemplate?: Event<string>;
+	readonly onDidChangeStatusBarCommands?: Event<Command[]>;
 	readonly acceptInputCommand?: Command;
 	readonly statusBarCommands?: Command[];
 	readonly onDidChange: Event<void>;
 
-	getOriginalResource(uri: URI): TPromise<URI>;
+	getOriginalResource(uri: URI): Promise<URI>;
 }
 
-export enum InputValidationType {
+export const enum InputValidationType {
 	Error = 0,
 	Warning = 1,
 	Information = 2
@@ -80,7 +78,7 @@ export interface IInputValidation {
 }
 
 export interface IInputValidator {
-	(value: string, cursorPosition: number): TPromise<IInputValidation | undefined>;
+	(value: string, cursorPosition: number): Promise<IInputValidation | undefined>;
 }
 
 export interface ISCMInput {
@@ -92,13 +90,19 @@ export interface ISCMInput {
 
 	validateInput: IInputValidator;
 	readonly onDidChangeValidateInput: Event<void>;
+
+	visible: boolean;
+	readonly onDidChangeVisibility: Event<boolean>;
 }
 
 export interface ISCMRepository extends IDisposable {
 	readonly onDidFocus: Event<void>;
+	readonly selected: boolean;
+	readonly onDidChangeSelection: Event<boolean>;
 	readonly provider: ISCMProvider;
 	readonly input: ISCMInput;
 	focus(): void;
+	setSelected(selected: boolean): void;
 }
 
 export interface ISCMService {
@@ -108,6 +112,8 @@ export interface ISCMService {
 	readonly onDidRemoveRepository: Event<ISCMRepository>;
 
 	readonly repositories: ISCMRepository[];
+	readonly selectedRepositories: ISCMRepository[];
+	readonly onDidChangeSelectedRepositories: Event<ISCMRepository[]>;
 
 	registerSCMProvider(provider: ISCMProvider): ISCMRepository;
 }

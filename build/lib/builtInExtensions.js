@@ -17,7 +17,7 @@ const ext = require('./extensions');
 const util = require('gulp-util');
 
 const root = path.dirname(path.dirname(__dirname));
-const builtInExtensions = require('../builtInExtensions');
+const builtInExtensions = require('../builtInExtensions.json');
 const controlFilePath = path.join(os.homedir(), '.vscode-oss-dev', 'extensions', 'control.json');
 
 function getExtensionPath(extension) {
@@ -31,7 +31,7 @@ function isUpToDate(extension) {
 		return false;
 	}
 
-	const packageContents = fs.readFileSync(packagePath);
+	const packageContents = fs.readFileSync(packagePath, { encoding: 'utf8' });
 
 	try {
 		const diskVersion = JSON.parse(packageContents).version;
@@ -49,7 +49,7 @@ function syncMarketplaceExtension(extension) {
 
 	rimraf.sync(getExtensionPath(extension));
 
-	return ext.fromMarketplace(extension.name, extension.version)
+	return ext.fromMarketplace(extension.name, extension.version, extension.metadata)
 		.pipe(rename(p => p.dirname = `${extension.name}/${p.dirname}`))
 		.pipe(vfs.dest('.build/builtInExtensions'))
 		.on('end', () => util.log(util.colors.blue('[marketplace]'), extension.name, util.colors.green('✔︎')));

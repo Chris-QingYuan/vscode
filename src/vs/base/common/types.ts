@@ -2,7 +2,6 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 const _typeof = {
 	number: 'number',
@@ -83,14 +82,14 @@ export function isBoolean(obj: any): obj is boolean {
 /**
  * @returns whether the provided parameter is undefined.
  */
-export function isUndefined(obj: any): boolean {
+export function isUndefined(obj: any): obj is undefined {
 	return typeof (obj) === _typeof.undefined;
 }
 
 /**
  * @returns whether the provided parameter is undefined or null.
  */
-export function isUndefinedOrNull(obj: any): boolean {
+export function isUndefinedOrNull(obj: any): obj is undefined | null {
 	return isUndefined(obj) || obj === null;
 }
 
@@ -125,19 +124,19 @@ export function isFunction(obj: any): obj is Function {
  * @returns whether the provided parameters is are JavaScript Function or not.
  */
 export function areFunctions(...objects: any[]): boolean {
-	return objects && objects.length > 0 && objects.every(isFunction);
+	return objects.length > 0 && objects.every(isFunction);
 }
 
 export type TypeConstraint = string | Function;
 
-export function validateConstraints(args: any[], constraints: TypeConstraint[]): void {
+export function validateConstraints(args: any[], constraints: Array<TypeConstraint | undefined>): void {
 	const len = Math.min(args.length, constraints.length);
 	for (let i = 0; i < len; i++) {
 		validateConstraint(args[i], constraints[i]);
 	}
 }
 
-export function validateConstraint(arg: any, constraint: TypeConstraint): void {
+export function validateConstraint(arg: any, constraint: TypeConstraint | undefined): void {
 
 	if (isString(constraint)) {
 		if (typeof arg !== constraint) {

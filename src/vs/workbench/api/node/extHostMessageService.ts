@@ -2,12 +2,11 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-'use strict';
 
 import Severity from 'vs/base/common/severity';
-import vscode = require('vscode');
+import * as vscode from 'vscode';
 import { MainContext, MainThreadMessageServiceShape, MainThreadMessageOptions, IMainContext } from './extHost.protocol';
-import { IExtensionDescription } from 'vs/platform/extensions/common/extensions';
+import { IExtensionDescription } from 'vs/workbench/services/extensions/common/extensions';
 
 function isMessageItem(item: any): item is vscode.MessageItem {
 	return item && item.title;
@@ -21,9 +20,9 @@ export class ExtHostMessageService {
 		this._proxy = mainContext.getProxy(MainContext.MainThreadMessageService);
 	}
 
-	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | string, rest: string[]): Thenable<string | undefined>;
-	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | vscode.MessageItem, rest: vscode.MessageItem[]): Thenable<vscode.MessageItem | undefined>;
-	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | string | vscode.MessageItem, rest: (string | vscode.MessageItem)[]): Thenable<string | vscode.MessageItem | undefined> {
+	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | string, rest: string[]): Promise<string | undefined>;
+	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | vscode.MessageItem, rest: vscode.MessageItem[]): Promise<vscode.MessageItem | undefined>;
+	showMessage(extension: IExtensionDescription, severity: Severity, message: string, optionsOrFirstItem: vscode.MessageOptions | string | vscode.MessageItem, rest: (string | vscode.MessageItem)[]): Promise<string | vscode.MessageItem | undefined> {
 
 		let options: MainThreadMessageOptions = { extension };
 		let items: (string | vscode.MessageItem)[];

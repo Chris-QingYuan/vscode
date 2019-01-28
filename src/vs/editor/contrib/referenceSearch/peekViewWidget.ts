@@ -3,31 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-'use strict';
-
-import 'vs/css!./media/peekViewWidget';
-import * as nls from 'vs/nls';
-import { Action } from 'vs/base/common/actions';
-import * as strings from 'vs/base/common/strings';
-import * as objects from 'vs/base/common/objects';
-import { $ } from 'vs/base/browser/builder';
-import Event, { Emitter } from 'vs/base/common/event';
 import * as dom from 'vs/base/browser/dom';
+import { IMouseEvent } from 'vs/base/browser/mouseEvent';
 import { ActionBar, IActionBarOptions } from 'vs/base/browser/ui/actionbar/actionbar';
-import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
-import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
-import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
-import { IOptions, ZoneWidget, IStyles } from 'vs/editor/contrib/zoneWidget/zoneWidget';
-import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
-import { ContextKeyExpr, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
+import { Action } from 'vs/base/common/actions';
 import { Color } from 'vs/base/common/color';
+import { Emitter, Event } from 'vs/base/common/event';
+import * as objects from 'vs/base/common/objects';
+import * as strings from 'vs/base/common/strings';
+import 'vs/css!./media/peekViewWidget';
+import { ICodeEditor } from 'vs/editor/browser/editorBrowser';
+import { ICodeEditorService } from 'vs/editor/browser/services/codeEditorService';
+import { EmbeddedCodeEditorWidget } from 'vs/editor/browser/widget/embeddedCodeEditorWidget';
+import { IOptions, IStyles, ZoneWidget } from 'vs/editor/contrib/zoneWidget/zoneWidget';
+import * as nls from 'vs/nls';
+import { ContextKeyExpr, RawContextKey } from 'vs/platform/contextkey/common/contextkey';
+import { ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 
 export namespace PeekContext {
 	export const inPeekEditor = new RawContextKey<boolean>('inReferenceSearchEditor', true);
 	export const notInPeekEditor: ContextKeyExpr = inPeekEditor.toNegated();
 }
 
-export function getOuterEditor(accessor: ServicesAccessor): ICodeEditor {
+export function getOuterEditor(accessor: ServicesAccessor): ICodeEditor | null {
 	let editor = accessor.get(ICodeEditorService).getFocusedCodeEditor();
 	if (editor instanceof EmbeddedCodeEditorWidget) {
 		return editor.getParentEditor();
@@ -36,13 +34,12 @@ export function getOuterEditor(accessor: ServicesAccessor): ICodeEditor {
 }
 
 export interface IPeekViewStyles extends IStyles {
-	headerBackgroundColor?: Color;
-	primaryHeadingColor?: Color;
-	secondaryHeadingColor?: Color;
+	headerBackgroundColor?: Color | null;
+	primaryHeadingColor?: Color | null;
+	secondaryHeadingColor?: Color | null;
 }
 
-export interface IPeekViewOptions extends IOptions, IPeekViewStyles {
-}
+export type IPeekViewOptions = IOptions & IPeekViewStyles;
 
 const defaultOptions: IPeekViewOptions = {
 	headerBackgroundColor: Color.white,
@@ -94,16 +91,16 @@ export abstract class PeekViewWidget extends ZoneWidget {
 	protected _applyStyles(): void {
 		super._applyStyles();
 		let options = <IPeekViewOptions>this.options;
-		if (this._headElement) {
+		if (this._headElement && options.headerBackgroundColor) {
 			this._headElement.style.backgroundColor = options.headerBackgroundColor.toString();
 		}
-		if (this._primaryHeading) {
+		if (this._primaryHeading && options.primaryHeadingColor) {
 			this._primaryHeading.style.color = options.primaryHeadingColor.toString();
 		}
-		if (this._secondaryHeading) {
+		if (this._secondaryHeading && options.secondaryHeadingColor) {
 			this._secondaryHeading.style.color = options.secondaryHeadingColor.toString();
 		}
-		if (this._bodyElement) {
+		if (this._bodyElement && options.frameColor) {
 			this._bodyElement.style.borderColor = options.frameColor.toString();
 		}
 	}
@@ -111,8 +108,8 @@ export abstract class PeekViewWidget extends ZoneWidget {
 	protected _fillContainer(container: HTMLElement): void {
 		this.setCssClass('peekview-widget');
 
-		this._headElement = <HTMLDivElement>$('.head').getHTMLElement();
-		this._bodyElement = <HTMLDivElement>$('.body').getHTMLElement();
+		this._headElement = dom.$('.head');
+		this._bodyElement = dom.$('.body');
 
 		this._fillHead(this._headElement);
 		this._fillBody(this._bodyElement);
@@ -122,22 +119,25 @@ export abstract class PeekViewWidget extends ZoneWidget {
 	}
 
 	protected _fillHead(container: HTMLElement): void {
-		var titleElement = $('.peekview-title').
-			on(dom.EventType.CLICK, e => this._onTitleClick(<MouseEvent>e)).
-			appendTo(this._headElement).
-			getHTMLElement();
+		const titleElement = dom.$('.peekview-title');
+		dom.append(this._headElement, titleElement);
+		dom.addStandardDisposableListener(titleElement, 'click', event => this._onTitleClick(event));
 
-		this._primaryHeading = $('span.filename').appendTo(titleElement).getHTMLElement();
-		this._secondaryHeading = $('span.dirname').appendTo(titleElement).getHTMLElement();
-		this._metaHeading = $('span.meta').appendTo(titleElement).getHTMLElement();
+		this._primaryHeading = dom.$('span.filename');
+		this._secondaryHeading = dom.$('span.dirname');
+		this._metaHeading = dom.$('span.meta');
+		dom.append(titleElement, this._primaryHeading, this._secondaryHeading, this._metaHeading);
 
-		const actionsContainer = $('.peekview-actions').appendTo(this._headElement);
+		const actionsContainer = dom.$('.peekview-actions');
+		dom.append(this._headElement, actionsContainer);
+
 		const actionBarOptions = this._getActionBarOptions();
 		this._actionbarWidget = new ActionBar(actionsContainer, actionBarOptions);
+		this._disposables.push(this._actionbarWidget);
 
 		this._actionbarWidget.push(new Action('peekview.close', nls.localize('label.close', "Close"), 'close-peekview-action', true, () => {
 			this.dispose();
-			return null;
+			return Promise.resolve();
 		}), { label: false, icon: true });
 	}
 
@@ -145,15 +145,15 @@ export abstract class PeekViewWidget extends ZoneWidget {
 		return {};
 	}
 
-	protected _onTitleClick(event: MouseEvent): void {
+	protected _onTitleClick(event: IMouseEvent): void {
 		// implement me
 	}
 
 	public setTitle(primaryHeading: string, secondaryHeading?: string): void {
-		$(this._primaryHeading).safeInnerHtml(primaryHeading);
+		this._primaryHeading.innerHTML = strings.escape(primaryHeading);
 		this._primaryHeading.setAttribute('aria-label', primaryHeading);
 		if (secondaryHeading) {
-			$(this._secondaryHeading).safeInnerHtml(secondaryHeading);
+			this._secondaryHeading.innerHTML = strings.escape(secondaryHeading);
 		} else {
 			dom.clearNode(this._secondaryHeading);
 		}
@@ -161,7 +161,7 @@ export abstract class PeekViewWidget extends ZoneWidget {
 
 	public setMetaTitle(value: string): void {
 		if (value) {
-			$(this._metaHeading).safeInnerHtml(value);
+			this._metaHeading.innerHTML = strings.escape(value);
 		} else {
 			dom.clearNode(this._metaHeading);
 		}
@@ -177,19 +177,19 @@ export abstract class PeekViewWidget extends ZoneWidget {
 			return;
 		}
 
-		var headHeight = Math.ceil(this.editor.getConfiguration().lineHeight * 1.2),
-			bodyHeight = heightInPixel - (headHeight + 2 /* the border-top/bottom width*/);
+		const headHeight = Math.ceil(this.editor.getConfiguration().lineHeight * 1.2);
+		const bodyHeight = heightInPixel - (headHeight + 2 /* the border-top/bottom width*/);
 
 		this._doLayoutHead(headHeight, widthInPixel);
 		this._doLayoutBody(bodyHeight, widthInPixel);
 	}
 
 	protected _doLayoutHead(heightInPixel: number, widthInPixel: number): void {
-		this._headElement.style.height = strings.format('{0}px', heightInPixel);
+		this._headElement.style.height = `${heightInPixel}px`;
 		this._headElement.style.lineHeight = this._headElement.style.height;
 	}
 
 	protected _doLayoutBody(heightInPixel: number, widthInPixel: number): void {
-		this._bodyElement.style.height = strings.format('{0}px', heightInPixel);
+		this._bodyElement.style.height = `${heightInPixel}px`;
 	}
 }

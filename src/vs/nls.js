@@ -17,13 +17,24 @@
 var NLSLoaderPlugin;
 (function (NLSLoaderPlugin) {
     var Environment = /** @class */ (function () {
-        function Environment(isPseudo) {
-            this.isPseudo = isPseudo;
-            //
+        function Environment() {
+            this._detected = false;
+            this._isPseudo = false;
         }
-        Environment.detect = function () {
-            var isPseudo = (typeof document !== 'undefined' && document.location && document.location.hash.indexOf('pseudo=true') >= 0);
-            return new Environment(isPseudo);
+        Object.defineProperty(Environment.prototype, "isPseudo", {
+            get: function () {
+                this._detect();
+                return this._isPseudo;
+            },
+            enumerable: true,
+            configurable: true
+        });
+        Environment.prototype._detect = function () {
+            if (this._detected) {
+                return;
+            }
+            this._detected = true;
+            this._isPseudo = (typeof document !== 'undefined' && document.location && document.location.hash.indexOf('pseudo=true') >= 0);
         };
         return Environment;
     }());
@@ -35,7 +46,15 @@ var NLSLoaderPlugin;
         else {
             result = message.replace(/\{(\d+)\}/g, function (match, rest) {
                 var index = rest[0];
-                return typeof args[index] !== 'undefined' ? args[index] : match;
+                var arg = args[index];
+                var result = match;
+                if (typeof arg === 'string') {
+                    result = arg;
+                }
+                else if (typeof arg === 'number' || typeof arg === 'boolean' || arg === undefined || arg === null) {
+                    result = String(arg);
+                }
+                return result;
             });
         }
         if (env.isPseudo) {
@@ -75,11 +94,11 @@ var NLSLoaderPlugin;
                 for (var _i = 2; _i < arguments.length; _i++) {
                     args[_i - 2] = arguments[_i];
                 }
-                return localize.apply(void 0, [_this._env, data, message].concat(args));
+                return localize.apply(undefined, [_this._env, data, message].concat(args));
             };
         }
         NLSPlugin.prototype.setPseudoTranslation = function (value) {
-            this._env = new Environment(value);
+            this._env._isPseudo = value;
         };
         NLSPlugin.prototype.create = function (key, data) {
             return {
@@ -130,11 +149,5 @@ var NLSLoaderPlugin;
         return NLSPlugin;
     }());
     NLSLoaderPlugin.NLSPlugin = NLSPlugin;
-    function init() {
-        define('vs/nls', new NLSPlugin(Environment.detect()));
-    }
-    NLSLoaderPlugin.init = init;
-    if (typeof doNotInitLoader === 'undefined') {
-        init();
-    }
+    define('vs/nls', new NLSPlugin(new Environment()));
 })(NLSLoaderPlugin || (NLSLoaderPlugin = {}));
